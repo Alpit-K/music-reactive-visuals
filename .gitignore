@@ -1,0 +1,9 @@
+.DS_Store
+node_modules/
+engine/dist/
+logs/
+launcher/bin/
+__pycache__/
+.pytest_cache/
+# Spike code lives at tag phase-0-spike; its ignored leftovers stay out of V1.
+/spike/

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <title>dj-vj</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none; }
+      canvas { width: 100vw; height: 100vh; object-fit: contain; display: block; }
+      #note, #overlay { position: fixed; left: 24px; color: #bbb; font: 18px ui-monospace, monospace; white-space: pre; }
+      #note { bottom: 24px; }
+      #overlay { top: 24px; display: none; }
+      #start { position: fixed; inset: 0; font-size: 32px; background: #000; color: #888; border: 0; }
+    </style>
+  </head>
+  <body>
+    <canvas id="wall" width="1920" height="1080"></canvas>
+    <div id="note"></div>
+    <div id="overlay"></div>
+    <button id="start">Click to start</button>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

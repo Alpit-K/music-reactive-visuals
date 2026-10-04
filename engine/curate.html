@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <title>dj-vj curation</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #000; color: #ccc; font: 16px ui-monospace, monospace; overflow: hidden; }
+      canvas { width: 100vw; height: 100vh; object-fit: contain; display: block; }
+      #hud { position: fixed; left: 16px; top: 16px; white-space: pre; text-shadow: 0 0 4px #000; }
+      #pick { position: fixed; inset: 0; display: grid; place-content: center; gap: 16px; background: #000; }
+      button, input { font-size: 20px; }
+    </style>
+  </head>
+  <body>
+    <canvas id="wall" width="1920" height="1080"></canvas>
+    <div id="hud"></div>
+    <div id="pick">
+      <button id="live">Live — BlackHole</button>
+      <label>Audio file: <input id="file" type="file" accept="audio/*" /></label>
+    </div>
+    <script type="module" src="/src/curate.ts"></script>
+  </body>
+</html>
