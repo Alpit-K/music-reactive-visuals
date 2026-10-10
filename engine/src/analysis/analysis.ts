@@ -20,6 +20,8 @@ export class Analysis {
   private interlude = new Interlude();
   private norm = [0, 1, 2, 3].map(() => new TimeWindow(CONFIG.normaliseS));
   private lastKick = -Infinity;
+  private swell = 0;
+  private lastT: number | null = null;
 
   frame(t: number, freqDb: Float32Array, wave: Float32Array, sampleRate: number): Features {
     const b = bandEnergies(freqDb, sampleRate);
@@ -41,9 +43,12 @@ export class Analysis {
       const range = w.max() - lo;
       return range > 1e-6 ? Math.min(1, Math.max(0, (x - lo) / range)) : 0;
     });
+    const dt = this.lastT === null ? 0 : t - this.lastT;
+    this.lastT = t;
+    this.swell += (bass - this.swell) * (1 - Math.exp(-dt / CONFIG.swellS));
 
     return {
-      sub, bass, mids, highs,
+      sub, bass, swell: this.swell, mids, highs,
       kick,
       sinceKick: t - this.lastKick,
       bpm: clock.bpm,
@@ -59,6 +64,7 @@ export class Analysis {
       busyness: il.busyness,
       rmsDb: rms,
       subDominanceDb: ch.subDominanceDb,
+      tempoBpm: ch.tempoBpm,
     };
   }
 }

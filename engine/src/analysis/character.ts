@@ -4,7 +4,7 @@ import type { Character } from '../scenes/types';
 const EPS = 1e-9;
 
 /**
- * Peak / main, breakdown and idle (design §5). Streaming port of sub_dominance and classify in
+ * Peak / dark / main, breakdown and idle (design §5). Streaming port of sub_dominance and classify in
  * phase-0-spike:spike/analyse.py: sub-dominance is measured only while the kick plays, held through
  * breakdowns, and peak needs 60 kick-playing seconds above threshold — slow in, fast out.
  */
@@ -16,6 +16,10 @@ export class CharacterModel {
   private playingValues: number[] = [];
   private subDominance: number | null = null;
   private run = 0;
+  private secBpm: number | null = null;
+  private tempoValues: number[] = [];
+  private tempo: number | null = null;
+  private dark = false;
   private character: Character = 'main';
   private lastKick: number | null = null;
   private quietSince: number | null = null;
@@ -30,6 +34,7 @@ export class CharacterModel {
       this.secKick = true;
       this.lastKick = t;
     }
+    if (bpm !== null) this.secBpm = bpm;
 
     const gapS = bpm ? (CONFIG.breakdown.bars * 4 * 60) / bpm : CONFIG.breakdown.fallbackS;
     const breakdown = this.lastKick !== null && t - this.lastKick >= gapS;
@@ -38,7 +43,7 @@ export class CharacterModel {
     else this.quietSince = null;
     const idle = this.quietSince !== null && t - this.quietSince >= CONFIG.idle.holdS;
 
-    return { character: this.character, breakdown, idle, subDominanceDb: this.subDominance };
+    return { character: this.character, breakdown, idle, subDominanceDb: this.subDominance, tempoBpm: this.tempo };
   }
 
   private closeSecond(): void {
@@ -52,7 +57,16 @@ export class CharacterModel {
     const above = this.subDominance !== null && this.subDominance >= CONFIG.peak.subDominanceDb;
     if (!above) this.run = 0;
     else if (playing) this.run++;
-    this.character = above && this.run >= CONFIG.peak.entryS ? 'peak' : 'main';
+    // Dark (design §5): median played tempo of kick-playing seconds, held through breakdowns and tempo-less stretches.
+    if (playing && this.secBpm !== null) {
+      this.tempoValues.push(this.secBpm);
+      if (this.tempoValues.length > CONFIG.dark.windowS) this.tempoValues.shift();
+      if (this.tempoValues.length >= CONFIG.dark.minS) this.tempo = [...this.tempoValues].sort((a, b) => a - b)[Math.floor(this.tempoValues.length / 2)];
+    }
+    if (this.tempo !== null) this.dark = this.dark ? this.tempo >= CONFIG.dark.leaveBpm : this.tempo >= CONFIG.dark.enterBpm;
+    const peak = above && this.run >= CONFIG.peak.entryS;
+    this.character = peak ? 'peak' : this.dark ? 'dark' : 'main';
+    this.secBpm = null;
     this.secSum = 0;
     this.secCount = 0;
     this.secKick = false;

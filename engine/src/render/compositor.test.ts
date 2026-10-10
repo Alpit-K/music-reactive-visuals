@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Scene } from '../scenes/types';
+import { SILENT, type Scene } from '../scenes/types';
 import { Compositor } from './compositor';
 
 // Enough of WebGL2 for the compositor to build its targets and programs: every call succeeds.
@@ -9,7 +9,7 @@ const fakeGl = new Proxy({} as Record<string | symbol, unknown>, {
 
 function scene(id: string, calls: string[], failInit = false): Scene {
   return {
-    id, family: 'geometric', source: 'test', licence: 'test', enabled: true,
+    id, source: 'test', licence: 'test', enabled: true,
     init: () => { calls.push(`${id}.init`); if (failInit) throw new Error('compile failed'); },
     render: (time) => { calls.push(`${id}.render@${time}`); },
     dispose: () => { calls.push(`${id}.dispose`); },
@@ -29,5 +29,28 @@ describe('Compositor.warmUp', () => {
     new Compositor(fakeGl, (id) => errors.push(id)).warmUp([scene('bad', calls, true), scene('ok', calls)]);
     expect(errors).toEqual(['bad']);
     expect(calls).toEqual(['bad.init', 'ok.init', 'ok.render@-2', 'ok.dispose']);
+  });
+});
+
+describe('Compositor.show', () => {
+  it('hands over to a swarm that can morph from the scene showing, disposing the old one at once', () => {
+    const calls: string[] = [];
+    const c = new Compositor(fakeGl, () => {});
+    const from = scene('a', calls);
+    const to: Scene = { ...scene('b', calls), morphFrom: (f, time, s) => { calls.push(`b.morphFrom ${f.id}@${time} for ${s}`); return true; } };
+    c.show(from, 1, 0, 0);
+    c.show(to, 2, 7, 10);
+    expect(calls).toEqual(['a.init', 'b.init', 'b.morphFrom a@10 for 7', 'a.dispose']);
+    c.render(11, SILENT);
+    expect(calls.slice(-1)).toEqual(['b.render@11']); // only the new scene draws
+  });
+
+  it('crossfades when the incoming scene cannot morph from the one showing', () => {
+    const calls: string[] = [];
+    const c = new Compositor(fakeGl, () => {});
+    c.show(scene('a', calls), 1, 0, 0);
+    c.show({ ...scene('b', calls), morphFrom: () => false }, 2, 7, 10);
+    c.render(11, SILENT);
+    expect(calls).toEqual(['a.init', 'b.init', 'a.render@11', 'b.render@11']);
   });
 });

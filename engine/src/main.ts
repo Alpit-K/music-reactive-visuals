@@ -6,8 +6,7 @@ import { Director, type Decision, type DirectorInput } from './director/director
 import { overlayText } from './overlay';
 import { Compositor } from './render/compositor';
 import { FrameWatch } from './render/frameWatch';
-import { interludeRole, WALL_PRESETS } from './scenes/interlude';
-import { createButterchurnScenes } from './scenes/psychedelic/butterchurn';
+import { POOLS, poolsOf } from './scenes/pools';
 import { loadShaderScenes } from './scenes/registry';
 import { SILENT, type Features, type Scene } from './scenes/types';
 import { loadCarry, saveCarry } from './session/carry';
@@ -37,7 +36,7 @@ async function start() {
   let running = true;
   const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, preserveDrawingBuffer: false })!;
   let director: Director | null = null;
-  let input: DirectorInput = { time: 0, bar: 0, barLine: false, bpm: null, character: 'main', breakdown: false, idle: true, surge: false, interlude: false };
+  let input: DirectorInput = { time: 0, bar: 0, barLine: false, bpm: null, character: 'main', breakdown: false, idle: true, interlude: false };
   const scenes = new Map<string, Scene>();
 
   const onSceneError = (id: string, err: unknown) => {
@@ -58,11 +57,11 @@ async function start() {
 
   for (const s of loadShaderScenes()) if (s.enabled) scenes.set(s.id, s);
   compositor.warmUp([...scenes.values()]);
-  const idle = [...scenes.values()].find((s) => s.family === 'idle')!;
+  const idle = scenes.get(POOLS.idle[0])!;
   compositor.show(idle, 1, 0, 0); // drift until audio and the director are up
 
-  // A lost context (GPU process crash) also takes Butterchurn's own context, which never recovers, and any
-  // scene set up meanwhile would fail and be disabled. Reloading rebuilds everything.
+  // A lost context (GPU process crash): any scene set up meanwhile would fail and be disabled. Reloading
+  // rebuilds everything.
   canvas.addEventListener('webglcontextlost', () => {
     running = false;
     sceneLog.push({ time: nowS(), event: 'context-lost' });
@@ -81,15 +80,7 @@ async function start() {
       navigator.mediaDevices.addEventListener('devicechange', () => {
         guard.lastAudioS = Math.min(guard.lastAudioS ?? 0, nowS() - CONFIG.stream.silentS); // recheck now
       });
-      try {
-        const bc = createButterchurnScenes(capture, WALL_PRESETS);
-        compositor.warmUp(bc);
-        for (const s of bc) scenes.set(s.id, s);
-      } catch (e) {
-        // Unmaintained dependency (design §3): without it, peaks fall back to idle drift.
-        sceneLog.push({ time: nowS(), event: 'butterchurn-unavailable', error: String(e) });
-      }
-      director = new Director([...scenes.values()].map((s) => ({ id: s.id, family: s.family, interlude: interludeRole(s.id) })), Number(session.replace(/\D/g, '').slice(-9)));
+      director = new Director([...scenes.values()].map((s) => ({ id: s.id, pools: poolsOf(s.id), swarm: s.morphFrom !== undefined })), Number(session.replace(/\D/g, '').slice(-9)));
       for (const id of carry.disabled) director.disable(id, input);
     } catch (e) {
       sceneLog.push({ time: nowS(), event: 'audio-unavailable', error: String(e) });
@@ -133,7 +124,7 @@ async function start() {
     }
     $('note').textContent = showNoAudioNote(t, guard) ? 'No audio from BlackHole — is PC MASTER OUT on?' : '';
 
-    input = { time: t, bar: features.bar, barLine: features.barLine, bpm: features.bpm, character: features.character, breakdown: features.breakdown, idle: features.idle, surge: features.surge, interlude: features.interlude };
+    input = { time: t, bar: features.bar, barLine: features.barLine, bpm: features.bpm, character: features.character, breakdown: features.breakdown, idle: features.idle, interlude: features.interlude };
     const dec = director?.update(input);
     if (dec) apply(dec);
 
@@ -148,7 +139,7 @@ async function start() {
 
     compositor.render(t, features);
     if (watch.lastSecond) {
-      frameLog.push({ ...watch.lastSecond, scale: watch.scale, scene: compositor.currentId, dampedFrames });
+      frameLog.push({ ...watch.lastSecond, scale: watch.scale, scene: compositor.currentId, dampedFrames, bpm: features.bpm === null ? null : +features.bpm.toFixed(1) });
       watch.lastSecond = null;
       dampedFrames = 0;
     }

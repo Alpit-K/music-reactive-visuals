@@ -2,7 +2,7 @@
 import { shaderScene } from '../shaderScene';
 
 export default shaderScene(
-  { id: 'geometric-hexgrid', family: 'geometric', enabled: false },
+  { id: 'geometric-hexgrid', enabled: false },
   `
 vec4 hex(vec2 p) {
   const vec2 s = vec2(1.0, 1.7320508);

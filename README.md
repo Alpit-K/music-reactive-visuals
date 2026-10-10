@@ -2,19 +2,19 @@
 
 Automatic, music-reactive visuals for home DJ sessions. rekordbox plays through a Pioneer DDJ-FLX4. A copy of the master mix reaches a browser engine through BlackHole, and the engine drives fullscreen visuals on a 1080p projector. Nobody touches it during the set.
 
-<img src=".github/images/scenes.jpg" alt="Twelve stills from the wall, four by three: the first seven are original shader scenes (cells, curves, flow, glitch, lasers, rings, shards), the last five are curated Butterchurn presets">
+<img src=".github/images/scenes.jpg" alt="Twelve stills from the wall, four by three, each a field of glowing dots: a dot liquid, a plasma tunnel, a black hole with jets, a volcano; a Chladni plate, interference ripples, a contour map, a romanesco; Turing coral, a fern-like Sierpinski fractal, a golden-angle sunflower and a dome of squiggly cells">
 
-*Seven original shader scenes (cells, curves, flow, glitch, lasers, rings, shards), then five of the curated Butterchurn presets. Rendered against a synthetic 128 BPM loop.*
+*Twelve of the particle-swarm scenes, rendered straight from the scene code on a simulated kick: peak (top row), main (middle), breakdowns and interludes (bottom).*
 
-**Status:** V1 is done (2026-10-03). It passed a 3.5-hour house-party set with no crash, no frame gaps and no thermal throttling. Next comes V1.1: recording a set and rendering it to video afterwards.
+**Status:** V1 is done (2026-10-03). It passed a 3.5-hour house-party set with no crash, no frame gaps and no thermal throttling. Since then every scene has become an original particle swarm (the Butterchurn presets went on 2026-10-09), and scenes are grouped into pools for each moment of a set (2026-10-10). Next comes a live set on this build, then V1.1: recording a set and rendering it to video afterwards.
 
 ## How it works
 
 - **The DJ setup is never touched.** rekordbox's PC MASTER OUT sends a copy of the master output to BlackHole, a virtual audio device. The engine listens only to that copy. Master output, headphone cue and the controller behave exactly as they would without dj-vj.
-- **The engine** runs in Chrome. It analyses the audio every frame (spectrum, kick, tempo, loudness) and sorts the music into **main** and **peak**. It also flags short events: **breakdown**, **drop**, **surge**, **ambient interlude** and **silence**.
-- **The director** picks a scene to suit what it hears, and decides when to switch. Calm organic shapes play in breakdowns. Geometric light scenes and psychedelic presets play in main sections and at peaks. Ambient interludes get a slow pool of their own, and silence shows a dim idle drift. A drop cuts hard back to the scene that was showing before its breakdown.
+- **The engine** runs in Chrome. It analyses the audio every frame (spectrum, kick, tempo, loudness) and sorts the music into **main**, **dark** (a played tempo held at 136 BPM or more — the harder, faster later part of a set) and **peak**. It also flags short events: **breakdown**, **drop**, **ambient interlude** and **silence**.
+- **The director** picks a scene to suit what it hears, and decides when to switch. Each moment — main, dark, peak, breakdown, ambient interlude and silence — has its own **pool** of scenes, listed in one file (`engine/src/scenes/pools.ts`) and chosen by hand on the curation page. A drop cuts hard to a peak scene: the one shown before its breakdown, if there was one. A change from one particle swarm to another morphs the dots from one shape into the next.
 - **The compositor** draws the scene, steps the render size down if frames run slow, and runs the **flash limiter**. No scene is trusted to limit its own flashing.
-- **Scenes are code.** There are original WebGL2 shaders (organic: cells, curves, flow; geometric: rings, lasers, glitch, shards) plus 46 curated [Butterchurn](https://github.com/jberg/butterchurn) (MilkDrop) presets. Original scenes are deterministic: time comes from the session clock and randomness from a seed.
+- **Scenes are code.** Every scene is original, and every one is a particle swarm — glowing dots that flow between shapes, so any scene can morph into the next: cells, curves, rings, lasers, shards, a dot liquid, halftone fields such as Turing coral, a Chladni plate and a golden-angle sunflower, fractals and living forms such as a fern, a romanesco, a dividing cell and jellyfish, a black hole, a Lorenz attractor, and more, including nine that reinterpret the [Butterchurn](https://github.com/jberg/butterchurn) (MilkDrop) presets the project used until 2026-10-09. Scenes are deterministic: time comes from the session clock and randomness from a seed.
 
 The full design is in [`docs/design.md`](docs/design.md): requirements, architecture, the character model, director rules and failure handling. Measured results are in [`docs/spike-findings.md`](docs/spike-findings.md).
 
@@ -69,7 +69,7 @@ cd engine && npm run dev                                # engine on http://local
 ```
 
 - `http://localhost:5173/`: the wall. Click once to start audio capture.
-- `http://localhost:5173/curate.html`: the curation page. It plays any scene against live audio, with keys to step through scenes and enable or disable them. Presets are chosen here, and new scenes are signed off on the projector here.
+- `http://localhost:5173/curate.html`: the curation page. It plays any scene against live audio or an audio file, with keys to step through scenes. New scenes are signed off on the projector here.
 - Analyse a recording offline (writes the same features log the wall would):
   ```bash
   cd engine && AUDIO=<file> OUT=<features.jsonl> npx vitest run src/analysis/audiofile.test.ts
@@ -92,12 +92,17 @@ Tests use synthetic signals only. Audio is never committed.
 | `engine/src/analysis` | Spectrum, kick detector, beat clock, character model |
 | `engine/src/director` | Scene choice and timing |
 | `engine/src/render` | Compositor, flash limiter, frame watch |
-| `engine/src/scenes` | Organic, geometric, psychedelic (Butterchurn), interlude and idle scenes |
+| `engine/src/scenes` | Scene files (folders keep the names of the old families) and `pools.ts`, which says where each scene shows |
 | `engine/src/session` | Session ID, log batching, state carried across a page reload |
 | `server/serve.py` | Standard-library HTTP server: serves the page, receives logs, handles quit |
 | `launcher/` | `vj.sh` session launcher, `audio.swift` output switcher, `build-app.sh` |
 | `docs/` | Design, and spike and live-set findings |
 
+## Credits
+
+- **The particle-swarm look is inspired by [AI Particle Simulator](https://particles.casberry.in/) by Casberry India**, and many swarm forms (saturn, power core, butterfly, jellyfish, black hole, aurora, Lorenz attractor and others) are redrawn after shapes in its gallery, including ones shared by its community. No code or assets were copied: each form was written from scratch after looking at screenshots. Credit and thanks to Casberry India and those gallery authors.
+- **Nine swarms reinterpret MilkDrop presets** played through [Butterchurn](https://github.com/jberg/butterchurn) in earlier versions: Airhandler (Aderrasi + Geiss), Red Liquid Fire, jelly showoff parade, disconnected, Thumbdrum Tokamak, True Visionary, _Mig_085, mother-of-pearl and stormy sea. Each keeps its preset's colour, motion and mood, written fresh as a swarm; the preset is named in its scene file.
+
 ## Licences
 
-The code is released under the [MIT licence](LICENSE). Original scenes are written from scratch, not ported from Shadertoy, whose default licence is non-commercial. Anything borrowed records its source and licence in its scene file. Butterchurn and its presets come from npm under their own licences.
+The code is released under the [MIT licence](LICENSE). Original scenes are written from scratch, not ported from Shadertoy, whose default licence is non-commercial. Anything borrowed records its source and licence in its scene file.

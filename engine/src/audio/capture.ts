@@ -4,7 +4,7 @@ type Device = Pick<MediaDeviceInfo, 'kind' | 'label' | 'deviceId'>;
 
 export interface Capture {
   ctx: AudioContext;
-  /** Stays the same across a reopen: the analyser and Butterchurn listen here, not to the stream. */
+  /** Stays the same across a reopen: the analyser listens here, not to the stream. */
   source: GainNode;
   analyser: AnalyserNode;
   track: MediaStreamTrack;

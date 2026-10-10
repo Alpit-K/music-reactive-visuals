@@ -47,8 +47,8 @@ Progressive, hypnotic and driving techno, plus house. Long blends, controlled en
 |---|---|---|
 | R1 | Visuals pulse with the beat (kicks, bass, hats) | V1 |
 | R2 | Visuals track the energy arc: breakdowns calm and sparse, drives tighter, peaks open up | V1 |
-| R3 | Visual family is chosen by what the audio can show (§5) — psychedelic liquid for sustained heavy peaks, organic/mathematical for breakdowns, geometric light for everything else, with over half of it given to psychedelic presets, and only presets during a surge (2026-10-02: geometric scenes alone made live sets repetitive) | V1 |
-| R4 | Within a family, the scene changes every 64 bars (~2 minutes), on a bar boundary, with a crossfade | V1 |
+| R3 | The scene pool is chosen by what the audio can show (§5) — peak for sustained heavy peaks, dark for a held fast tempo, breakdown, interlude, main for everything else — and each pool's scenes are the user's picks (§6, 2026-10-10). Until then a visual family per moment: psychedelic liquid for peaks, organic/mathematical for breakdowns, geometric light otherwise | V1 |
+| R4 | Within a pool, the scene changes every 64 bars (~2 minutes), on a bar boundary, with a crossfade | V1 |
 | R5 | Silence shows a slow ambient drift scene, never a frozen frame or the desktop | V1 |
 | R6 | Fully automatic — no controls during a set; the only key is quit | V1 |
 | R7 | One icon starts a session: checks, audio routing, fullscreen on the projector | V1 |
@@ -72,15 +72,15 @@ A one-hour set (the user's real set length — changed from two hours on 2026-10
 
 ## 3. Approach and rejected alternatives
 
-**Chosen: a browser engine.** A local web app running fullscreen in a dedicated Chrome window on the projector, analysing BlackHole audio with the Web Audio API and drawing scenes with WebGL2 shaders. The psychedelic family is provided by Butterchurn (MIT-licensed WebGL port of MilkDrop, which accepts any Web Audio node and blends presets with a configurable duration).
+**Chosen: a browser engine.** A local web app running fullscreen in a dedicated Chrome window on the projector, analysing BlackHole audio with the Web Audio API and drawing scenes with WebGL2 shaders. Every scene is original code; the psychedelic family was provided by Butterchurn (MIT-licensed WebGL port of MilkDrop) until 2026-10-09.
 
 Why: fastest loop for writing scenes (save a file, see it on the wall), all three visual families available from day one, and the same scene code serves both live playback and after-set video rendering.
 
-**Butterchurn is effectively unmaintained** — the latest stable release (2.6.7) dates from March 2019; a 3.0 beta line has had one release since 2021 (July 2025). Pin the exact version. If a Chrome or WebGL change breaks it, the peak family loses its only source — at runtime it falls back to idle drift (§7) until original psychedelic scenes exist.
+**Butterchurn was dropped 2026-10-09.** It was unmaintained (last stable release March 2019), not deterministic (§8), and after the first live set on the swarm build the user judged its presets low quality next to the swarms and wanted them gone. Nine presets the user kept were rebuilt as swarms (§6); the rest were cut. Phase-out had been agreed 2026-10-08 on a rule of four kept originals each for peaks and interludes; the user chose to drop all presets at once instead.
 
 | Alternative | Why not |
 |---|---|
-| **Native Python** (aubio + moderngl) | Better beat tracking and an easy Ableton Link path, but no Butterchurn — the psychedelic family would need writing from scratch or fragile projectM bindings — and slower visual iteration. Held in reserve: if browser analysis proves too crude, analysis alone moves into a Python helper and the rest of the design stands |
+| **Native Python** (aubio + moderngl) | Better beat tracking and an easy Ableton Link path, but no Butterchurn (the deciding factor in 2026-09, moot since 2026-10-09) and slower visual iteration. Held in reserve: if browser analysis proves too crude, analysis alone moves into a Python helper and the rest of the design stands |
 | **projectM with a wrapper** | Fails the "own scenes as code" goal — MilkDrop preset language is obscure — and energy-based preset choice would mean driving the library API, not the app. The packaged macOS build also cannot capture local application audio (projectMSDL 2.0 pre-release notes), so BlackHole is needed regardless |
 
 ---
@@ -146,30 +146,33 @@ launcher (one icon): pre-flight checks → local server → Chrome on projector
 
 ### Character
 
-My levels are three characters, not points on one scale: **deep** is sparse and spacious, **driving** is a continuous kick with bright tops, **peak** is weight — a heavy low end and tension-and-release. Only peak is visible in the audio, so the model outputs two characters plus events:
+My levels are characters, not points on one scale: **driving** is a continuous kick with bright tops, **peak** is weight — a heavy low end and tension-and-release — and **dark** is where my sets turn harder and faster later on. *Revised 2026-10-10:* "deep" was first pictured as sparse and spacious, but asked what "deeper/darker" means in my sets, the answer was harder and faster, and my rekordbox history shows the tempo climbing through a set (spike-findings §9). The model outputs three characters plus events; each shows its own pool of scenes (§6):
 
-| Output | Signature | Family |
+| Output | Signature | Pool |
 |---|---|---|
-| **peak** | Sub dominates bass (20–60 Hz over 60–150 Hz) while the kick plays | Psychedelic liquid |
-| **main** | Everything else with a kick | Geometric light, 55% of picks psychedelic |
-| **breakdown** (event) | Kicks absent for 8 bars | Organic / mathematical |
-| **surge** (event) | Over the last 4 s against the median of the 26 s before, loudness up 4 dB **or** highs (2–16 kHz) up 6 dB, with a kick in the last 2 s — the only decision that hears above the bass | A preset, if geometric is showing in main |
+| **peak** | Sub dominates bass (20–60 Hz over 60–150 Hz) while the kick plays | peak |
+| **dark** | Played tempo held at 136 BPM or more: median over the last 120 kick-playing seconds | dark |
+| **main** | Everything else with a kick | main |
+| **breakdown** (event) | Kicks absent for 8 bars | breakdown |
+| **surge** (event) | Over the last 4 s against the median of the 26 s before, loudness up 4 dB **or** highs (2–16 kHz) up 6 dB, with a kick in the last 2 s — the only decision that hears above the bass | **None since 2026-10-09** — detected and shown on the overlay only. It lifted main to a preset, which was the main route into psychedelic in the 2026-10-09 set (12 surges an hour): presets early in the set, on slow tracks, and swarms cut off 2–26 s after arriving |
 | **idle** (event) | Near-silence for 3 seconds | Idle drift |
-| **interlude** (event) | Smooth sound: 30 s busyness under 0.9 and the last 8 s too, held 15 s; ends when the last 8 s go above 1.3. Busyness is the mean dB rise per frame over bass, mids and highs (silent seconds left out) | The interlude pool (§6) |
+| **interlude** (event) | Smooth sound: 30 s busyness under 0.9 and the last 8 s too, held 15 s; ends when the last 8 s go above 1.3. Busyness is the mean dB rise per frame over bass, mids and highs (silent seconds left out) | interlude |
 
 | Rule | Detail | Why |
 |---|---|---|
 | Measured only while the kick plays | Sub-dominance is the mean of sub/bass (dB) over the last 60 kick-playing seconds; it holds its value through breakdowns | Peak has breakdowns of its own (22:00–23:30 in the tuning set); averaging them in made the character flicker with every breakdown |
 | Fixed threshold | 3.2 dB in the tuning set; stored in a config file | A consistently heavy set should stay peak, not be re-labelled relative to itself |
 | **Slow in, fast out** | Peak only after sub-dominance has held above threshold for 60 kick-playing seconds; back to main as soon as it drops | A low-pass filter sweep cuts 60–150 Hz but not the sub, faking sub-dominance for as long as the sweep lasts — and I ride the filter regularly in builds and blends. No static spectral check told a filtered stretch from a dark peak track |
-| **Breakdown** | Kicks absent for 8 bars (15 s without a tempo) → organic at the next bar line | Breakdowns are the moment people notice. 2 bars (until 2026-10-02) caught transition gaps, fills and soft kicks: a live set flipped scenes every few seconds (spike-findings §6) |
-| **Drop** | Kicks return after a breakdown → a preset immediately (§6 director rules) | So is the drop |
+| **Breakdown** | Kicks absent for 8 bars (15 s without a tempo) → the breakdown pool at the next bar line | Breakdowns are the moment people notice. 2 bars (until 2026-10-02) caught transition gaps, fills and soft kicks: a live set flipped scenes every few seconds (spike-findings §6) |
+| **Drop** | Kicks return after a breakdown → a peak scene immediately (§6 director rules) | So is the drop |
 | Idle | Near-silence for 3 seconds | Stops, pauses and B2B handovers |
-| **Interlude by busyness, not by kicks or tempo** | Added 2026-10-03 (spike-findings §7). Precedence: idle, interlude, breakdown, peak, main | Ambient music fakes kicks (drone swells, ripples in an empty sub band) and the clock folds any gaps into a plausible tempo, so "no kick" and "< 115 BPM" never fire; rumbling techno hides its kick from every sub-band beat test tried. Busyness never fell below 1.03 over 30 s in the user's sets and sat under 0.9 for ~90% of an ambient mix |
+| **Dark by played tempo** | Added 2026-10-10 (spike-findings §9). The median of the clock's tempo over the last 120 kick-playing seconds, once 60 are in (`CONFIG.dark`); dark at ≥ 136, back to main below 133. Seconds without a kick or without a tempo add nothing, so dark holds through breakdowns and stretches the clock loses | A 60 s window let one 30 s tempo misread drop dark for 45 s on the 10-02 replay. **Absolute, not relative to the set's opening** (user, 2026-10-10): a set that is fast from the first track is dark from the start, as a consistently heavy set stays peak. Not a clock either — on 10-02 dj-vj was launched 75 minutes into the set |
+| **Interlude by busyness, not by kicks or tempo** | Added 2026-10-03 (spike-findings §7). Precedence: idle, interlude, breakdown, peak, dark, main | Ambient music fakes kicks (drone swells, ripples in an empty sub band) and the clock folds any gaps into a plausible tempo, so "no kick" and "< 115 BPM" never fire; rumbling techno hides its kick from every sub-band beat test tried. Busyness never fell below 1.03 over 30 s in the user's sets and sat under 0.9 for ~90% of an ambient mix |
 
 **Known limitations (accepted 2026-10-01):**
 
-- **Deep and driving are indistinguishable** — loudness, kick continuity, brightness, mids and sub all overlap. A deep section with a steady kick gets geometric visuals; organic appears only when the kick is actually missing. **No longer accepted (2026-10-03):** the user wants deep and driving to look different; how to detect it is open.
+- **Sparse and driving are indistinguishable** — loudness, kick continuity, brightness, mids and sub all overlap. *Since 2026-10-10* the user's later, "deeper" stretches are told apart by tempo (dark, above); what stays invisible is a section that is sparse but fast, or dense but slow.
+- **Dark is tuned on one set** (set 4, 10-02, dark minimal at 129–139: dark 17:39–52:38, with peak outranking it 35:05–36:34, and 54:27–end). A fast Max Cooper-style set reads dark too, by the user's rule. **In rumble the clock does not go silent** — once it has a tempo it keeps one, possibly a misread from mostly off-beat kick gaps (§7) — so a long misread stretch can push the median below 133 and drop dark. On set 4's heavy rumble (minutes 44–47) the clock read 134–139 and dark held; untested on heavier rumble.
 - **About 2 minutes' lag into peak** (one minute to fill the window, one minute of entry hold), and **peaks shorter than ~2–3 minutes stay geometric** — the tuning set's 2-minute closing peak was never detected.
 - **A bright peak reads as main** — e.g. an acid-heavy peak with a punchy mid-bass rather than a sub. My usual peaks are dark and sub-heavy, so this was accepted.
 - **A filter sweep longer than ~1 minute can still fake peak**, and an EQ bass swap lowers sub-dominance during blends.
@@ -179,7 +182,7 @@ My levels are three characters, not points on one scale: **deep** is sparse and 
 
 ### Debug overlay
 
-One key toggles an overlay showing bands, kicks, BPM, sub-dominance and character. It exists to tune thresholds; it is off by default and is not a performance control.
+One key toggles an overlay showing bands, kicks, BPM, sub-dominance, the dark tempo median and character. It exists to tune thresholds; it is off by default and is not a performance control.
 
 ---
 
@@ -190,31 +193,44 @@ One key toggles an overlay showing bands, kicks, BPM, sub-dominance and characte
 ```ts
 interface Scene {
   id: string;
-  family: 'organic' | 'geometric' | 'psychedelic' | 'idle';
   source: string;      // "original" or where it came from
   licence: string;
   enabled: boolean;
   init(gl: WebGL2RenderingContext, seed: number): void;
   render(time: number, features: Features, size: RenderSize): void;
   dispose(): void;
+  morphFrom?(from: Scene, time: number, seconds: number): boolean; // swarms only (below)
+  forms?(): Scene[];   // curation only: one scene per form of a multi-form swarm
 }
 ```
 
 - **`size`** is the compositor's scaled render target, added in V1 because scenes render below canvas size when the render scale steps down (§7).
 - **Deterministic by rule.** `time` comes from the session clock and all randomness from `seed`. `Date.now()` and `Math.random()` are forbidden in scenes — this is what makes after-set rendering reproduce the night.
-- **The scene file is the single source of truth** for its metadata. The registry discovers scene modules automatically; there is no separate manifest to drift.
-- **Butterchurn presets** are wrapped as scenes. Butterchurn draws into its own canvas, which the compositor uploads as a texture each frame so the flash limiter still governs it. The per-frame copy costs GPU time — measured in spike 3 and affordable: shader plus copy held 60 fps at 1080p for 30 minutes. Butterchurn runs its own audio analysis, so these presets react in MilkDrop's way rather than to our features; acceptable for the one family meant to be wild.
-- **Every scene is warmed before the set.** `Compositor.warmUp` runs each scene through what a live switch does — `init`, one frame off-screen, `dispose`. For presets that means the 4 s Butterchurn blend, because the GPU builds the blended pipeline at the first draw that uses it. Skipping the warm-up costs 33–200 ms at a scene's first showing (spike-findings §6, §11).
+- **The scene file is the single source of truth for how a scene looks**; the registry discovers scene modules (any folder under `scenes/`) automatically. **Where it shows lives in `scenes/pools.ts`** (2026-10-10), one list for the whole set so the assignment reads on one screen — it replaced each scene's `family` and the interlude list. A scene may sit in several pools; one in none is `enabled: false` in its file, and a test fails if an enabled scene is in no pool or a pool names a missing one.
+- **Every scene is a particle swarm** (`scenes/particleScene.ts`, since 2026-10-09): tens of thousands of glowing points drawn in one call, flowing between 3D shapes from a shared library (`SHAPES`). Each point's position is a pure function of its index, the seed and the clock — no state between frames, so swarms stay deterministic. A swarm clears its own target and blends additively; 24 000–40 000 points hold 60 fps at 1080p headless. All scenes became swarms because only swarm-to-swarm changes morph, and the user found solid scenes looked out of place next to the dots. The look is after particles.casberry.in, written fresh because that site states no licence.
+- **Swarms morph into each other.** A swarm's settings are uniforms, not compiled constants, so one program draws two swarms: on a swarm-to-swarm change the incoming scene takes over the outgoing one's points (`Scene.morphFrom`) and flows each from its old position and colour to its new one — one draw, no crossfade. Points one swarm has and the other lacks fade in or out. A scene of one form never flows into itself (the morph arc would swing every point aside each hold).
+- **All swarms share one compiled program**, built on first use and kept for the context's life; each swarm sets all its uniforms every frame, as another swarm may have left its own. Before this (2026-10-10), each switch waited ~42 ms on a blocking shader build (`getProgramParameter`) although every swarm's source is identical; switching every half-second now drops 0–2 frames in 24 switches.
+- **Reaction is a ripple, not a bounce:** the kick sends a soft ripple out from the centre (reaching the edge ~0.6 s later) instead of scaling the whole form, and the bass swell follows `Features.swell`, bass smoothed over `CONFIG.swellS` (0.6 s) — raw bass made every swarm bounce on every hit. Shapes hold 16 bars in main and peak swarms (4 and 8 were too quick).
+- **Facing forms** (`facing`) skip the camera's turn and tilt, for forms that fill the screen (grain, vortex, spirograph tunnel, pearl fringe, sea) — a turned plane goes edge-on. A shape may set its own colour place (`hu`), e.g. one colour per vortex arm.
+- **Shape noise takes the swarm's own seed** (`hash`, `noise` and `fbm` in `COMMON` take it as an argument): during a morph one program draws two swarms under one `u_seed`, so noise keyed on `u_seed` reshuffled the outgoing swarm the moment a morph began.
+- **Halftones** — a grid of dots sized and coloured by a field (the `liquid` form, coral, Chladni plate, plasma tunnel and others) keep a solid shader's character while letting it morph; the user's preferred direction since 2026-10-09.
+- **Tuning lessons:** reaction-diffusion needs state between frames, so Turing coral is single-scale noise cut at its middle; a golden-angle spiral needs few big seeds (4 000 — at 70 000 it smeared into moiré); a strict golden spiral (φ each quarter turn) reads as a hook, so the nautilus grows by φ each half turn; a value that sets a dot's launch time must not also set its launch speed, or the dots move in sheets (volcano); a drift offset keyed on a dot's radius alone moves whole rings and draws them (mitosis); dots hidden by size still glow as haze, so a pore must take them to zero (radiolarian). The muted palettes `sand`, `bone`, `steel` and `storm` break the saturated-stops rule on purpose and are drawn dim.
+- **Every scene is warmed before the set.** `Compositor.warmUp` runs each scene through what a live switch does — `init`, one frame off-screen, `dispose`, because the GPU builds a pipeline at the first draw that uses it. Skipping the warm-up costs 33–200 ms at a scene's first showing (spike-findings §6, §8).
 
 ### V1 inventory
 
-| Family | Shown for (§5) | Count | Source |
+*Pools since 2026-10-10* (`scenes/pools.ts`): the user curated every scene and swarm form on the curation page, played live against tracks from their own set — first where each shows, then a dark pass. Until then a scene's family decided its moment.
+
+| Pool | Shown for (§5) | Count | Scenes |
 |---|---|---|---|
-| Organic / mathematical | Breakdowns | 3 | Original shaders |
-| Geometric light | Main | 4 | Original shaders: rings, lasers, glitch, shards (hexgrid off since 2026-10-02 — too dim, too alike between showings); presets take `mainPresetShare` (55%) of main picks |
-| Psychedelic liquid | Peak | 8–15 | Curated Butterchurn presets |
-| Interlude pool (across families) | Ambient interludes | 14 | The user's picks (2026-10-03, `scenes/interlude.ts`): organic curves and flow, 11 rotation presets, and *martin – castle in the air*, shown only in interludes |
-| Idle drift | Silence | 1 | Slowed, dimmed organic scene |
+| Main | main | 11 | attractor, Chladni plate, lasers, the main swarm (sphere, cube, helix, donut, DNA, knot, saturn, twist, tunnel, octahedron, dodecahedron, icosahedron, and the tree from the interlude swarm), shards, tesseract, wire lattice; contour map (was interlude), mitosis (was breakdown), romanesco (also peak), bar terrain (was peak) |
+| Dark | dark | 13 | ripples, spirograph tunnel, radiolarian, rings, shards, wire lattice, mitosis, black hole, bar terrain, and four `dark-` swarms carrying forms of the other swarms with those swarms' motion: power core (main swarm, on the dark palettes deepsea, nebula, ultraviolet and fire), rose nebula (interlude swarm), breathing field (breakdown swarm), filaments and tentacled orb (peak swarm) |
+| Peak | peak, and every drop | 8 | black hole (also dark), fire bloom, liquid, the peak swarm (supernova, sun, galaxy, DNA — tunnel, twist and knot cut, filaments and tentacles moved to dark), plasma tunnel, volcano, vortex, romanesco |
+| Breakdown | breakdowns | 8 | cells, coral, curves, fern / triangle, jellyfish, the breakdown swarm (its field also in dark), pinecone, sunflower |
+| Interlude | ambient interludes | 11 | curves and coral (also breakdown), the interlude swarm (chronos ribbon moved in from the main swarm), silk, grain, neon tube, pearl fringe, sea, aurora, squiggle dome, digital rain (was main) |
+| Idle | silence | 1 | A slow particle swarm that ignores the audio (2026-10-08) |
+
+Off the wall: cell sheet (cut 2026-10-10) and hexgrid (long off). The forms of a multi-form swarm can be split across pools: a form moved to a pool that has a swarm joins it and takes its motion (ribbon, tree); a form moved to dark, which has no swarm of its own, rides in a `dark-` copy of its old swarm. Earlier inventories (families, Butterchurn presets) are in git history.
 
 Scenes are written fresh rather than ported from Shadertoy, whose default licence restricts reuse: shaders without a stated licence are **CC BY-NC-SA 3.0 Unported** (confirmed 2026-10-01 from shadertoy.com/terms "What license will my Shaders have?", read via a search-engine copy because the page blocks direct fetches) — non-commercial only, attribution, and derivatives under the same licence. Keeping scene code clean preserves the option to publish the repo later. Anything borrowed records its source and licence in the scene file.
 
@@ -222,27 +238,27 @@ Scenes are written fresh rather than ported from Shadertoy, whose default licenc
 
 | Event | Action | Timing | Crossfade |
 |---|---|---|---|
-| Character changes (main ↔ peak) | Pick a scene from the new family — only once the current scene has shown for `director.minStayS` (60 s), so a drop is not demoted seconds after it lands | Next bar line | 4 beats |
-| Breakdown | Switch to organic | Next bar line | 8 beats |
-| Drop | A preset: the one shown before the breakdown if there was one, else a new pick; geometric only without Butterchurn. The previous family is restored underneath, so the next character change or rotation follows it | Immediately — not the next bar line, since V1 bar lines can be 1–3 beats off (decided 2026-10-01) | None: a hard cut on the kick (2026-10-02 — a 2-beat fade back to the same preset felt too soft) |
-| 64 bars in one scene | Next scene in the same family | Next bar line | Family default |
-| Surge while a geometric scene shows in main | A preset; rotations during the surge also pick presets | Next bar line, not waiting out the minimum stay | 2 beats |
+| Character changes (main ↔ dark ↔ peak) | Pick a scene from the new pool — only once the current scene has shown for `director.minStayS` (60 s), so a drop is not demoted seconds after it lands | Next bar line | 4 beats |
+| Breakdown | Switch to the breakdown pool | Next bar line | 8 beats |
+| Drop | A peak scene: the one shown before the breakdown if there was one, else a new pick; the wanted pool (main, or dark) only if there are none. The wanted pool (main or dark) is restored underneath, so the next character change or rotation follows it | Immediately — not the next bar line, since V1 bar lines can be 1–3 beats off (decided 2026-10-01) | None: a hard cut on the kick (2026-10-02 — a 2-beat fade back to the same scene felt too soft) |
+| 64 bars in one scene | Next scene in the same pool | Next bar line | Pool default |
+| Any change from one swarm to another | The points morph from one scene to the next (§6 particle swarms) | As the event's own row | At least `director.morphBeats` (16 beats); a drop stays a hard cut |
 | Silence 3 s / audio returns | Enter / leave idle drift | Immediately | ~4 seconds (no beat clock in silence) |
 | Interlude starts | A scene from the interlude pool | Immediately | 15 s |
 | 120 s in one interlude scene | Next scene in the pool, least recently shown | Immediately (no beat to wait for) | 15 s — slow on purpose: the user asked for slower than 60 s |
-| Interlude ends | The wanted family | Immediately | None: a hard cut, like the drop (user, 2026-10-03) |
+| Interlude ends | The wanted pool | Immediately | None: a hard cut, like the drop (user, 2026-10-03) |
 
-Selection is a seeded shuffle within the family, least-recently-shown first, never repeating the current scene. A main pick is a Butterchurn preset with probability `director.mainPresetShare` (55%), else geometric; the family stays main, so moving to peak is still a character change. Each shader scene draws its shape — counts, symmetry, size, palette — from its seed, so a repeat showing looks different, not only recoloured. Every decision is appended to the scene log: `{time, bar, event, sceneId, seed, level, crossfadeBeats}`.
+Selection is a seeded shuffle within the pool, least-recently-shown first across the whole set, never repeating the current scene — so a scene in both main and dark is not picked again when main turns dark. A dark pool with no scenes left (none listed, or all failed) shows main's. Least-recently-shown is the only repeat guard: a scene waits until the rest of its pool has shown. Each shader scene draws its shape — counts, symmetry, size, palette — from its seed, so a repeat showing looks different, not only recoloured. Every decision is appended to the scene log: `{time, bar, event, sceneId, seed, level, crossfadeBeats}`.
 
 ### Flash limiter
 
 Lives in the compositor so no scene — original or borrowed — can bypass it. Each frame is downscaled to an **8 × 6 grid of tiles** (~240 × 180 px each at 1080p). Per tile it measures relative luminance and whether the tile is saturated red. A **change** is a tile's luminance moving ≥ 0.10 back from its brightest or darkest point since its last change, while the darker side is below 0.80 — **however many frames it takes**. It also counts when the tile moves into or out of saturated red, far enough in chromaticity from its colour at its last red change. As in WCAG, a **flash** is a pair of opposing changes. Brightness and red share **one budget: once any tile has had three flashes (six changes) inside any one-second window, further changes are damped across the whole frame** (whole frame, so the damping leaves no seams). Changes are counted 0.01 early, because the wall's 8-bit output can sit about 0.005 from the limiter's own record of it. *Revised 2026-10-01 after the V1 review:* the first version counted only jumps between consecutive frames, so a smooth 4–6 Hz swing (a preset pulsing at hi-hat rate) passed untouched, at up to 13 changes a second. Counting every jump instead of pairs would also have damped an ordinary kick pulse — a rise and a fall per beat is 4.3 changes a second at 128 BPM — which breaks R1. So the limiter counts pairs, as WCAG does. It is stricter than the standard in two ways: tiles are smaller than WCAG's area threshold, and brightness and red share one budget where WCAG allows three of each. Tiles finer than the area threshold can only over-count, which is the safe direction for any reasonable wall size.
 
-**Verified 2026-10-01 against WCAG 2.2 SC 2.3.1 "Three Flashes or Below Threshold" (Level A, [w3.org Understanding page](https://www.w3.org/WAI/WCAG22/Understanding/three-flashes-or-below-threshold.html)):** content must not flash "more than three times in any one second period" unless below the thresholds. A general flash is "a pair of opposing changes in relative luminance of 10% or more of the maximum relative luminance (1.0) where the relative luminance of the darker image is below 0.80" — so the jump threshold is **0.10 relative luminance**, applied only when the darker frame is below 0.80. **Red flashes** count too: transitions involving saturated red (R/(R+G+B) ≥ 0.8, chromaticity change > 0.2 in CIE 1976 UCS) — psychedelic presets are the likely source. **Area:** flashes count when they cover more than 25% of any 10° visual field (WCAG's desktop stand-in: 341 × 256 px). On a wall, 10° is a fraction of the image (about 0.5 m across at 3 m), which is why the limiter measures tiles rather than the whole frame — a whole-frame mean barely moves for a large local flash.
+**Verified 2026-10-01 against WCAG 2.2 SC 2.3.1 "Three Flashes or Below Threshold" (Level A, [w3.org Understanding page](https://www.w3.org/WAI/WCAG22/Understanding/three-flashes-or-below-threshold.html)):** content must not flash "more than three times in any one second period" unless below the thresholds. A general flash is "a pair of opposing changes in relative luminance of 10% or more of the maximum relative luminance (1.0) where the relative luminance of the darker image is below 0.80" — so the jump threshold is **0.10 relative luminance**, applied only when the darker frame is below 0.80. **Red flashes** count too: transitions involving saturated red (R/(R+G+B) ≥ 0.8, chromaticity change > 0.2 in CIE 1976 UCS) — the psychedelic scenes are the likely source. **Area:** flashes count when they cover more than 25% of any 10° visual field (WCAG's desktop stand-in: 341 × 256 px). On a wall, 10° is a fraction of the image (about 0.5 m across at 3 m), which is why the limiter measures tiles rather than the whole frame — a whole-frame mean barely moves for a large local flash.
 
 ### Curation page
 
-A separate page that plays any scene against live audio or a saved audio file, with keys to step through scenes and toggle `enabled`. This is how Butterchurn presets are chosen and how each new original scene is signed off — by eye, on the wall.
+A separate page that plays any scene against live audio or a saved audio file, with keys to step through scenes. This is how each new scene is signed off — by eye, on the wall. Its preset keys and flash sweep went with Butterchurn (2026-10-09).
 
 ---
 
@@ -269,8 +285,8 @@ PC MASTER OUT is **not** left on permanently: with it on, every rekordbox launch
 
 | Failure | Response |
 |---|---|
-| Scene fails to compile or throws | Disabled for the session and logged; director picks another. A family with no working scenes falls back to idle drift |
-| WebGL context lost | Reload the page, which rebuilds the context and every scene. Rebuilding in place was dropped in V1: Butterchurn's own context has no loss handling, and scenes set up while the context is lost fail and would be disabled for the session |
+| Scene fails to compile or throws | Disabled for the session and logged; director picks another. A pool with no working scenes falls back to idle drift — dark falls back to main first |
+| WebGL context lost | Reload the page, which rebuilds the context and every scene. Rebuilding in place was dropped in V1: Butterchurn's own context had no loss handling, and scenes set up while the context is lost fail and would be disabled for the session |
 | BlackHole cannot be opened at start | Retry every 2 s; idle drift meanwhile |
 | Stream silent > 10 s (including a stream that ended), or a `devicechange` event | Reopen the stream in place, and again every 5 s while the silence lasts. An open stream can go silent with no error: opened at a rate rekordbox then changes (spike 1), or across a PC MASTER OUT toggle at the same rate (spike-findings §5). Reopening is invisible on the wall, so a paused deck or a B2B handover costs nothing, and recovery never rests on a single attempt. Replaced V1's one page reload per silence on 2026-10-01: once that reload was spent, a later toggle left idle drift all night |
 | Frame time > 20 ms for 10 s | Step render scale down 100% → 83% → 67%; never back up within a session, to avoid oscillation; logged. Gaps in the frame clock count as slow frames — a page that draws nothing writes no frame times, which hid the spike 3 freezes from its report |
@@ -291,8 +307,7 @@ There is **no reminder to switch PC MASTER OUT off** (decided 2026-10-01). If it
 - A second icon, **"VJ (record)"**, enables recording. It is opt-in because saving Spotify streams to disk is barred by Spotify's terms — the User Guidelines prohibit "copying, reproducing, redistributing, "ripping," recording, transferring…" Spotify content (checked 2026-10-01, spotify.com/uk/legal/user-guidelines); recorded sets use downloaded tracks.
 - **During the set:** the recorder taps the BlackHole stream with `MediaRecorder` and posts chunks every 10 s; the server appends them to `recordings/<session>/`. The scene log and a `session.json` (seeds, thresholds, code version) sit alongside. Negligible extra load.
 - **`vj render <session>`:** runs the engine in render mode, stepping time at a fixed frame interval over the decoded audio, **replaying the logged director decisions** rather than re-deciding, so the video matches what the wall showed. Frames are encoded in-browser (WebCodecs) and ffmpeg muxes the audio.
-- **Butterchurn can be fed pre-computed audio** (confirmed 2026-10-01 by reading 2.6.7's source, not yet run): `visualizer.render({ audioLevels: { timeByteArray, timeByteArrayL, timeByteArrayR }, elapsedTime })` skips its own analyser and uses the given time step.
-- **But Butterchurn is not deterministic:** it calls `Math.random()` in 29 places — per-preset `rand_start`/`rand_preset`, noise textures, blend-mode choice, and the global `rand()` that preset equations use. A re-render will not match the night. **Hypothesis:** swapping `Math.random` for a seeded generator around each Butterchurn call (and preset load) makes it reproducible; test by rendering the same preset and audio twice and comparing frames. If not, psychedelic segments render in real time and are not frame-exact.
+- **Every scene is a pure function of time, seed and features** since Butterchurn was dropped (2026-10-09) — it called `Math.random()` in 29 places, so its segments could not have matched the night.
 
 ---
 
@@ -329,13 +344,10 @@ Each is unproven until its test runs.
 | PC MASTER OUT delivers a clean copy of master (without cue) to BlackHole while the FLX4 stays primary | **Confirmed 2026-10-01** — spike-findings §1 (copy is pre-master-knob) |
 | rekordbox does not silence PC MASTER OUT for Spotify tracks | **Confirmed 2026-10-01** — spike-findings §1; local files not yet tested |
 | ~~Browser analysis separates the three energy levels on this music~~ | **Disproved by spike 2** — only peak is separable; replaced by the character model (§5) |
-| Sub-dominance marks my peaks on sets other than the tuning set, and filter sweeps rarely outlast the 60 s entry hold | **Open** — failed 2026-10-03 against 15-minute-grid labels on a Max Cooper recording (spike-findings §7), not a fair verdict. Next: re-label that recording to the half-minute, or label one of my own sets. **Deferred past V1** (2026-10-04): the 3.5-hour house-party set read peak ~19 min with no complaint, but was unlabelled (spike-findings §8) |
+| Sub-dominance marks my peaks on sets other than the tuning set, and filter sweeps rarely outlast the 60 s entry hold | **Open** — failed 2026-10-03 against 15-minute-grid labels on a Max Cooper recording (spike-findings §7), not a fair verdict. Next: re-label that recording to the half-minute, or label one of my own: DJ 15+ minutes live on the dev page with `?features=1`, ideally with a 3+ minute peak, noting the minutes heard as deep / driving / peak; write `logs/<session>/features.labels.csv` (`# heard levels, to the minute` then one `m:ss,level` row per change); score with `git show phase-0-spike:spike/analyse.py > logs/analyse.py` and `uv run logs/analyse.py <features.jsonl> <labels.csv>`. **Pass:** held out, main ≥ 80% and peak ≥ 60%, and no peak over 1 minute inside a section heard as deep or driving; a fail reopens §5. **Deferred past V1** (2026-10-04): the 3.5-hour house-party set read peak ~19 min with no complaint, but was unlabelled (spike-findings §8) |
 | The fanless Air sustains 1080p plus the Butterchurn copy alongside rekordbox | **Confirmed 2026-10-01** — spike-findings §3 (31 min, median p95 17.5 ms, thermal Nominal; autumn room) — and for a 58-minute live set with presets on screen 86% of the time, 2026-10-02 (spike-findings §6), and a 3.5-hour house-party set at render scale 1 throughout, 2026-10-03 (spike-findings §8) |
-| Butterchurn's first-load stall is a one-off per preset, so loading each preset once before the set removes it | **Disproved, fixed** — the old warm-up loaded presets with blend 0, but a live switch blends, so the GPU built the blended pipeline at the first draw mid-set. Warm-up now runs every scene through `init` + one frame + `dispose`: cold first showings 33–117 ms → ≤ 33 ms. About 5–20 ms of Butterchurn JS per load remains, and removing it needs a patch (spike-findings §6). **Live check passed 2026-10-03:** median 33 ms (one dropped frame) at 115 preset entries, worst 66 ms (spike-findings §8) |
 | Chromium stops drawing a window macOS reports as hidden; launch flags such as `--disable-backgrounding-occluded-windows` and `--disable-renderer-backgrounding` prevent it (flag names unverified) | **Partly tested 2026-10-01** (spike-findings §5): with the launcher's flags, no gaps over 45 s of rekordbox use, Cmd-Tab and Spaces; one unexplained 10.4 s stall earlier in the session. No gaps over 3.5 hours of live rekordbox use, 2026-10-03 (spike-findings §8) |
 | The picture's lag behind the sound is too small to notice on the projector | **Not noticeable at normal speed 2026-10-01** (spike-findings §5); not measured — to measure, film a speaker cone and the wall together |
-| ~~Butterchurn accepts pre-computed audio per frame~~ | **Confirmed by source read 2026-10-01** (§8) |
-| A seeded `Math.random` swap makes Butterchurn reproducible | Before V1.1: render one preset over the same audio twice, compare frames (§8) |
 | rekordbox exposes Ableton Link on this plan and controller | **Confirmed 2026-10-01** — spike-findings §4 (no Ableton Live needed) |
 | rekordbox's Link phase 0 falls on the track's beat-grid downbeat | Before V3: print each phase wrap from `spike/link_probe.py`, compare with rekordbox's bar counter (spike-findings §4) |
 | A dj-vj Link peer that only reads never moves rekordbox's tempo, whichever side joins first | Before V3: start the probe with `Link(100)`, then turn rekordbox LINK on with a deck at 124 (spike-findings §4) |
@@ -343,6 +355,7 @@ Each is unproven until its test runs.
 | Reopening the stream in place recovers it after a same-rate PC MASTER OUT toggle | **Confirmed 2026-10-02** — two toggles on rekordbox, each recovered on the first reopen, sound back ~3 s after it (spike-findings §5) |
 | A Chrome relaunched by the watchdog shows no "Restore pages?" bubble on the kiosk window | **Confirmed 2026-10-01** — spike-findings §5 |
 | In ordinary fullscreen, `--hide-crash-restore-bubble` keeps the bubble off a relaunched window, and `--window-position` with `--start-fullscreen` lands on the projector | **Confirmed 2026-10-02** — fullscreen on the projector with no bar; `kill -9` relaunched in 1 s with no bubble (spike-findings §5) |
+| Played tempo at ≥ 136 BPM (held over 120 kick-playing seconds) marks when the user's sets turn harder and darker | **Open** — set on one replay (10-02, spike-findings §9). Next live set: `frames.jsonl` logs the clock's `bpm` every second (not the 120 s median, and it keeps its last value through breakdowns); `scene-log.jsonl` writes `level` only at decisions, which wait 60 s after a change. Replay the set's tempo through the dark rule, or read the overlay live, and compare with the user's sense of when the set turned |
 | Other apps can read FLX4 MIDI while rekordbox runs | Start of Phase 2 |
 | The kick detector finds the kick in rumbling techno | **Disproved 2026-10-03** on set 4's opening and minutes 44–47: ~100 onsets a minute at 138 BPM with only 9–20% of gaps one beat long, whichever band (sub, bass, both) it listens to (spike-findings §7). 115–150 hides it by discarding gaps; any wider tempo range exposes it. Next test needs raw audio of a set, not the 60 Hz six-band log |
 | Busyness separates ambient interludes from the user's techno on live sets, not only on the logs it was set on | The next set with an interlude, on the dev page with `?features=1` (the launcher stopped logging features 2026-10-04): `features.jsonl` replayed with `REPLAY=`, interlude spans against the user's notes. 2026-10-03: 10 interludes in 3.5 hours, no notes kept — the user played ambient once or twice, otherwise chill tracks after unmixed switches (spike-findings §8) |
@@ -353,7 +366,7 @@ Each is unproven until its test runs.
 
 - **Do NOT route rekordbox's primary output through a Multi-Output or aggregate device.** It is the one change that can break headphone cue; the visuals must listen to a copy only.
 - **Do NOT use `Date.now()` or `Math.random()` inside a scene.** It silently breaks after-set rendering.
-- **Do NOT enforce flash limits per scene.** The compositor owns it, so borrowed presets cannot bypass it.
+- **Do NOT enforce flash limits per scene.** The compositor owns it, so no scene can bypass it.
 - **Do NOT make any scene or feature depend on the drum machine or DJ Set Architect.**
 - **Do NOT modify, re-sign or memory-read rekordbox.** V3 uses Ableton Link, a supported interface.
 - **Do NOT write to Ableton Link.** Every peer can set the shared tempo, and a rekordbox deck with LINK on follows it — a dj-vj that sets tempo, or wins the session at its own tempo, retimes the track playing (spike-findings §4).

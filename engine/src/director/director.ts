@@ -1,16 +1,13 @@
 import { CONFIG } from '../config';
-import type { Character, Family } from '../scenes/types';
+import type { Character, Pool } from '../scenes/types';
 import { rng } from './rng';
 
-export type DirectorEvent = 'start' | 'character' | 'breakdown' | 'drop' | 'surge' | 'rotate' | 'silence' | 'audio-returns' | 'scene-failed' | 'interlude' | 'interlude-ends';
-
-// An ambient interlude draws from its own pool across families (design §6).
-type Pool = Family | 'interlude';
+export type DirectorEvent = 'start' | 'character' | 'breakdown' | 'drop' | 'rotate' | 'silence' | 'audio-returns' | 'scene-failed' | 'interlude' | 'interlude-ends';
 
 export interface DirectorScene {
   id: string;
-  family: Family;
-  interlude?: 'also' | 'only'; // in the interlude pool; 'only' keeps it out of its family's rotation
+  pools: readonly Pool[]; // the moments it shows at (scenes/pools.ts)
+  swarm?: boolean; // a particle swarm: a change between two of them morphs rather than crossfades
 }
 
 export interface Decision {
@@ -32,14 +29,13 @@ export interface DirectorInput {
   character: Character;
   breakdown: boolean;
   idle: boolean;
-  surge: boolean;
   interlude: boolean;
 }
 
 /** Chooses which scene is shown and when (design §6). Pure: same seed and inputs → same decisions. */
 export class Director {
   current: string | null = null;
-  private family: Pool | null = null;
+  private active: Pool | null = null;
   private seed = 0;
   private sceneBar = 0;
   private sceneTime = 0;
@@ -57,8 +53,8 @@ export class Director {
     const want = this.wanted(i);
     if (this.current === null) return this.show(want, 'start', i, null);
 
-    if (want !== this.family) {
-      const event = this.eventFor(this.family!, want);
+    if (want !== this.active) {
+      const event = this.eventFor(this.active!, want);
       if (event === 'drop') return this.drop(want, i);
       if (event === 'interlude') return this.showFor(want, event, i, CONFIG.director.interlude.crossfadeS);
       if (event === 'interlude-ends') return this.show(want, event, i, 0); // a hard cut, like the drop
@@ -73,12 +69,6 @@ export class Director {
     if (want === 'interlude') {
       if (i.time - this.sceneTime < CONFIG.director.interlude.rotateS || this.candidates(want).length === 0) return null;
       return this.showFor(want, 'rotate', i, CONFIG.director.interlude.crossfadeS);
-    }
-
-    // A surge lifts a geometric scene in main to a preset; it does not wait out the minimum stay.
-    const showing = this.scenes.find((s) => s.id === this.current)?.family;
-    if (i.surge && want === 'geometric' && showing !== 'psychedelic' && (i.barLine || i.bpm === null)) {
-      return this.show(want, 'surge', i, i.bpm ? CONFIG.director.crossfadeBeats.surge : null, 'psychedelic');
     }
 
     if (i.barLine && i.bar - this.sceneBar >= CONFIG.director.rotateBars) {
@@ -97,8 +87,9 @@ export class Director {
 
   private wanted(i: DirectorInput): Pool {
     if (!i.idle && i.interlude && this.pool('interlude').length > 0) return 'interlude';
-    const f: Family = i.idle ? 'idle' : i.breakdown ? 'organic' : i.character === 'peak' ? 'psychedelic' : 'geometric';
-    return this.pool(f).length > 0 ? f : 'idle';
+    let p: Pool = i.idle ? 'idle' : i.breakdown ? 'breakdown' : i.character === 'peak' ? 'peak' : i.character === 'dark' ? 'dark' : 'main';
+    if (p === 'dark' && this.pool('dark').length === 0) p = 'main'; // dark is main, harder: without its own scenes it shows main's
+    return this.pool(p).length > 0 ? p : 'idle';
   }
 
   private eventFor(from: Pool, to: Pool): DirectorEvent {
@@ -106,34 +97,26 @@ export class Director {
     if (from === 'idle') return 'audio-returns';
     if (to === 'interlude') return 'interlude';
     if (from === 'interlude') return 'interlude-ends';
-    if (to === 'organic') return 'breakdown';
-    if (from === 'organic') return 'drop';
+    if (to === 'breakdown') return 'breakdown';
+    if (from === 'breakdown') return 'drop';
     return 'character';
   }
 
-  private pool(f: Pool) {
-    const inPool = (s: DirectorScene) => (f === 'interlude' ? s.interlude !== undefined : s.family === f && s.interlude !== 'only');
-    return this.scenes.filter((s) => inPool(s) && !this.disabled.has(s.id));
+  private pool(p: Pool) {
+    return this.scenes.filter((s) => s.pools.includes(p) && !this.disabled.has(s.id));
   }
 
   private candidates(f: Pool) {
     return this.pool(f).filter((s) => s.id !== this.current);
   }
 
-  // Main is geometric light with presets mixed in at a set share, and only presets during a surge; the
-  // family stays geometric, so a preset shown in main does not count as a character change.
-  private source(f: Pool, i: DirectorInput): Pool {
-    if (f !== 'geometric' || this.candidates('psychedelic').length === 0) return f;
-    return i.surge || this.rand() < CONFIG.director.mainPresetShare ? 'psychedelic' : f;
-  }
-
-  // The drop is the moment people notice: it lands on a preset whatever the character, returning to
-  // the one shown before the breakdown if there was one. Without presets it is an ordinary pick.
+  // The drop is the moment people notice: it lands on a peak scene whatever the character, returning to
+  // the one shown before the breakdown if there was one. Without peak scenes it is an ordinary pick.
   private drop(f: Pool, i: DirectorInput): Decision | null {
     const beats = CONFIG.director.crossfadeBeats.drop;
     const prev = this.beforeBreakdown;
-    const keep = prev && this.pool('psychedelic').some((s) => s.id === prev.id) ? prev : undefined;
-    return this.show(f, 'drop', i, beats, 'psychedelic', keep);
+    const keep = prev && this.pool('peak').some((s) => s.id === prev.id) ? prev : undefined;
+    return this.show(f, 'drop', i, beats, 'peak', keep);
   }
 
   private showFor(f: Pool, event: DirectorEvent, i: DirectorInput, seconds: number): Decision | null {
@@ -142,10 +125,10 @@ export class Director {
     return dec;
   }
 
-  private show(f: Pool, event: DirectorEvent, i: DirectorInput, beats: number | null, from = this.source(f, i), keep?: { id: string; seed: number }): Decision | null {
+  private show(f: Pool, event: DirectorEvent, i: DirectorInput, beats: number | null, from: Pool = f, keep?: { id: string; seed: number }): Decision | null {
     if (this.pool(from).length === 0) from = f;
     let options = this.candidates(from);
-    if (options.length === 0) options = this.pool(from); // a family of one: keep showing it after a family change
+    if (options.length === 0) options = this.pool(from); // a pool of one: keep showing it after a pool change
     if (options.length === 0) return null;
     let pick: { id: string };
     let seed: number;
@@ -159,9 +142,11 @@ export class Director {
       seed = Math.floor(this.rand() * 2 ** 32);
     }
 
+    const isSwarm = (id: string | null) => this.scenes.some((s) => s.id === id && s.swarm);
+    if (beats !== null && beats > 0 && isSwarm(this.current) && isSwarm(pick.id)) beats = Math.max(beats, CONFIG.director.morphBeats);
     if (event === 'breakdown' && this.current !== null) this.beforeBreakdown = { id: this.current, seed: this.seed };
     this.current = pick.id;
-    this.family = f;
+    this.active = f;
     this.seed = seed;
     this.sceneBar = i.bar;
     this.sceneTime = i.time;

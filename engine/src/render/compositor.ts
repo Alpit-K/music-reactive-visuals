@@ -123,6 +123,12 @@ export class Compositor {
       this.a = slot;
       return;
     }
+    // Swarm to swarm: the points flow from one scene into the next, instead of two pictures crossfading.
+    if (scene.morphFrom?.(this.a.scene, time, crossfadeS)) {
+      this.drop(this.a);
+      this.a = slot;
+      return;
+    }
     this.b = slot;
     this.fadeStart = time;
     this.fadeS = crossfadeS;

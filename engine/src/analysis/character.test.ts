@@ -90,3 +90,63 @@ describe('CharacterModel — breakdown, drop, idle', () => {
     expect(at(8.05).idle).toBe(false);
   });
 });
+
+/** One bpm per second (60 frames each), a kick at the start of each playing second; out[s] is the verdict on second s. */
+function tempoPerSecond(bpm: (number | null)[], playing: boolean[] = bpm.map(() => true), subDb = 0): string[] {
+  const m = new CharacterModel();
+  const out: string[] = [];
+  for (let s = 0; s <= bpm.length; s++) {
+    const i = Math.min(s, bpm.length - 1);
+    let c = 'main';
+    for (let f = 0; f < 60; f++) {
+      c = m.update(s + f / 60, playing[i] && f === 0, SUB_FOR(subDb), 1, -20, bpm[i]).character;
+      if (f === 0 && s > 0) out.push(c);
+    }
+  }
+  return out;
+}
+const fill = (n: number, v: number | null) => Array<number | null>(n).fill(v);
+
+describe('CharacterModel — dark', () => {
+  it('stays main at a driving tempo', () => {
+    expect(tempoPerSecond(fill(300, 130)).every((c) => c === 'main')).toBe(true);
+  });
+
+  it('turns dark once 60 kick-playing seconds hold a median of 136 or more', () => {
+    const out = tempoPerSecond(fill(300, 138));
+    expect(out.slice(0, 59).every((c) => c === 'main')).toBe(true);
+    expect(out.slice(59).every((c) => c === 'dark')).toBe(true);
+  });
+
+  it('returns to main once the 120 s median falls below 133', () => {
+    const out = tempoPerSecond([...fill(200, 138), ...fill(200, 132)]);
+    expect(out[259]).toBe('dark'); // 60 of 120 seconds at 132: the median is still 138
+    expect(out[260]).toBe('main'); // 61 of 120
+  });
+
+  it('holds dark between 133 and 136, and never enters there', () => {
+    expect(tempoPerSecond([...fill(200, 138), ...fill(200, 134)]).slice(59).every((c) => c === 'dark')).toBe(true);
+    expect(tempoPerSecond(fill(300, 134)).every((c) => c === 'main')).toBe(true);
+  });
+
+  it('rides out a 30 s tempo misread', () => {
+    expect(tempoPerSecond([...fill(200, 138), ...fill(30, 120), ...fill(100, 138)]).slice(59).every((c) => c === 'dark')).toBe(true);
+  });
+
+  it('counts only kick-playing seconds, and holds through a breakdown', () => {
+    const late = tempoPerSecond(fill(300, 138), [...Array(100).fill(false), ...Array(200).fill(true)]);
+    expect(late[158]).toBe('main');
+    expect(late[159]).toBe('dark');
+    const gap = tempoPerSecond(fill(260, 138), [...Array(100).fill(true), ...Array(60).fill(false), ...Array(100).fill(true)]);
+    expect(gap.slice(59).every((c) => c === 'dark')).toBe(true);
+  });
+
+  it('holds dark while the kick plays but the clock has no tempo (rumble)', () => {
+    expect(tempoPerSecond([...fill(100, 138), ...fill(100, null), ...fill(50, 138)]).slice(59).every((c) => c === 'dark')).toBe(true);
+  });
+
+  it('lets peak outrank dark', () => {
+    const out = tempoPerSecond(fill(200, 138), undefined, 5);
+    expect(out.slice(59).every((c) => c === 'peak')).toBe(true);
+  });
+});

@@ -20,16 +20,18 @@ function spectrumFor(bands: number[]): Float32Array {
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 describe.runIf(path)('replay of a spike capture log', () => {
-  it('prints peak and interlude spans, breakdowns and tempo', () => {
+  it('prints peak, dark and interlude spans, breakdowns and tempo', () => {
     const rows = readFileSync(path!, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     const t0 = rows[0].t;
     const a = new Analysis();
     const wave = new Float32Array(2048);
     let peakStart: number | null = null;
+    let darkStart: number | null = null;
     let inBreakdown = false;
     let interludeStart: number | null = null;
     const interludes: string[] = [];
     const peaks: string[] = [];
+    const darks: string[] = [];
     const breakdowns: string[] = [];
     const bpms: number[] = [];
     for (const r of rows) {
@@ -41,6 +43,11 @@ describe.runIf(path)('replay of a spike capture log', () => {
         peaks.push(`${mmss(peakStart)}–${mmss(t)}`);
         peakStart = null;
       }
+      if (f.character === 'dark' && darkStart === null) darkStart = t;
+      if (f.character !== 'dark' && darkStart !== null) {
+        darks.push(`${mmss(darkStart)}–${mmss(t)}`);
+        darkStart = null;
+      }
       if (f.interlude && interludeStart === null) interludeStart = t;
       if (!f.interlude && interludeStart !== null) {
         interludes.push(`${mmss(interludeStart)}–${mmss(t)}`);
@@ -51,8 +58,10 @@ describe.runIf(path)('replay of a spike capture log', () => {
       if (f.bpm && Math.floor(t) % 10 === 0) bpms.push(f.bpm);
     }
     if (peakStart !== null) peaks.push(`${mmss(peakStart)}–end`);
+    if (darkStart !== null) darks.push(`${mmss(darkStart)}–end`);
     if (interludeStart !== null) interludes.push(`${mmss(interludeStart)}–end`);
     console.log('peak:', peaks.join(', '));
+    console.log('dark:', darks.join(', ') || 'none');
     console.log('breakdowns:', breakdowns.join(', '));
     console.log('interludes:', interludes.join(', ') || 'none');
     console.log('bpm range:', Math.min(...bpms).toFixed(1), '–', Math.max(...bpms).toFixed(1));

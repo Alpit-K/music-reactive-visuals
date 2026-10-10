@@ -1,18 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { Director, type DirectorInput } from './director';
 import { CONFIG } from '../config';
-import type { Family } from '../scenes/types';
+import type { Pool } from '../scenes/types';
 
-const SCENES: { id: string; family: Family }[] = [
-  { id: 'o1', family: 'organic' }, { id: 'o2', family: 'organic' }, { id: 'o3', family: 'organic' },
-  { id: 'g1', family: 'geometric' }, { id: 'g2', family: 'geometric' }, { id: 'g3', family: 'geometric' },
-  { id: 'p1', family: 'psychedelic' }, { id: 'p2', family: 'psychedelic' },
-  { id: 'idle', family: 'idle' },
+const SCENES: { id: string; pools: Pool[] }[] = [
+  { id: 'o1', pools: ['breakdown'] }, { id: 'o2', pools: ['breakdown'] }, { id: 'o3', pools: ['breakdown'] },
+  { id: 'g1', pools: ['main'] }, { id: 'g2', pools: ['main'] }, { id: 'g3', pools: ['main'] },
+  { id: 'p1', pools: ['peak'] }, { id: 'p2', pools: ['peak'] },
+  { id: 'idle', pools: ['idle'] },
 ];
-const fam = (id: string | null) => SCENES.find((s) => s.id === id)?.family;
-const isMain = (id: string | null) => fam(id) === 'geometric' || fam(id) === 'psychedelic'; // main mixes in presets
+const fam = (id: string | null) => SCENES.find((s) => s.id === id)?.pools[0];
 const input = (s: Partial<DirectorInput> = {}): DirectorInput => ({
-  time: 0, bar: 0, barLine: false, bpm: 128, character: 'main', breakdown: false, idle: false, surge: false, interlude: false, ...s,
+  time: 0, bar: 0, barLine: false, bpm: 128, character: 'main', breakdown: false, idle: false, interlude: false, ...s,
 });
 
 describe('Director', () => {
@@ -20,7 +19,7 @@ describe('Director', () => {
     const d = new Director(SCENES, 1);
     const dec = d.update(input())!;
     expect(dec.event).toBe('start');
-    expect(isMain(dec.sceneId)).toBe(true);
+    expect(fam(dec.sceneId)).toBe('main');
   });
 
   it('waits for the next bar line on a breakdown, then crossfades 8 beats', () => {
@@ -29,18 +28,18 @@ describe('Director', () => {
     expect(d.update(input({ time: 10, breakdown: true }))).toBeNull();
     const dec = d.update(input({ time: 11, bar: 1, barLine: true, breakdown: true }))!;
     expect(dec.event).toBe('breakdown');
-    expect(fam(dec.sceneId)).toBe('organic');
+    expect(fam(dec.sceneId)).toBe('breakdown');
     expect(dec.crossfadeBeats).toBe(8);
     expect(dec.crossfadeS).toBeCloseTo((8 * 60) / 128);
   });
 
-  it('returns to the previous family on the drop at once, without waiting for a bar line, as a hard cut', () => {
+  it('lands the drop on a peak scene at once, without waiting for a bar line, as a hard cut', () => {
     const d = new Director(SCENES, 1);
     d.update(input());
     d.update(input({ bar: 1, barLine: true, breakdown: true }));
     const dec = d.update(input({ time: 20, bar: 1, barLine: false }))!;
     expect(dec.event).toBe('drop');
-    expect(isMain(dec.sceneId)).toBe(true);
+    expect(fam(dec.sceneId)).toBe('peak');
     expect(dec.crossfadeBeats).toBe(0);
     expect(dec.crossfadeS).toBe(0);
   });
@@ -50,7 +49,7 @@ describe('Director', () => {
     d.update(input());
     const dec = d.update(input({ time: CONFIG.director.minStayS, bar: 1, barLine: true, character: 'peak' }))!;
     expect(dec.event).toBe('character');
-    expect(fam(dec.sceneId)).toBe('psychedelic');
+    expect(fam(dec.sceneId)).toBe('peak');
     expect(dec.crossfadeBeats).toBe(4);
   });
 
@@ -62,7 +61,7 @@ describe('Director', () => {
     expect(d.update(input({ time: stay, bar: 2, barLine: true, character: 'peak' }))!.event).toBe('character');
   });
 
-  it('lands a drop on a preset: the one shown before the breakdown, with its seed, if there was one', () => {
+  it('lands a drop on the peak scene shown before the breakdown, with its seed, if there was one', () => {
     const d = new Director(SCENES, 1);
     const peak = d.update(input({ character: 'peak' }))!;
     d.update(input({ time: 10, bar: 1, barLine: true, character: 'peak', breakdown: true }));
@@ -74,9 +73,9 @@ describe('Director', () => {
     for (let seed = 1; seed <= 20; seed++) {
       const g = new Director(SCENES.filter((s) => s.id !== 'p2'), seed); // geometric before the breakdown
       let first = g.update(input())!;
-      while (fam(first.sceneId) !== 'geometric') first = g.update(input({ bar: (first.bar + 64), barLine: true }))!;
+      while (fam(first.sceneId) !== 'main') first = g.update(input({ bar: (first.bar + 64), barLine: true }))!;
       g.update(input({ time: 1000, bar: first.bar + 1, barLine: true, breakdown: true }));
-      expect(fam(g.update(input({ time: 1020, bar: first.bar + 9 }))!.sceneId)).toBe('psychedelic');
+      expect(fam(g.update(input({ time: 1020, bar: first.bar + 9 }))!.sceneId)).toBe('peak');
     }
   });
 
@@ -88,34 +87,24 @@ describe('Director', () => {
     expect(d.update(input({ time: 132, bar: 10, barLine: true, character: 'main' }))).toBeNull();
   });
 
-  it('drops to main when there are no presets (Butterchurn broken)', () => {
-    const d = new Director(SCENES.filter((s) => s.family !== 'psychedelic'), 1);
+  it('drops to main when there are no peak scenes', () => {
+    const d = new Director(SCENES.filter((s) => !s.pools.includes('peak')), 1);
     d.update(input());
     d.update(input({ time: 10, bar: 1, barLine: true, breakdown: true }));
-    expect(fam(d.update(input({ time: 30, bar: 9 }))!.sceneId)).toBe('geometric');
+    expect(fam(d.update(input({ time: 30, bar: 9 }))!.sceneId)).toBe('main');
   });
 
-  it('switches a geometric scene to a preset on a surge at the next bar line, inside the minimum stay', () => {
+  it('morphs between two swarms over at least the morph length; other changes keep their crossfade', () => {
+    const scenes = [
+      { id: 'gs', pools: ['main'] as Pool[], swarm: true }, { id: 'g1', pools: ['main'] as Pool[] },
+      { id: 'ps', pools: ['peak'] as Pool[], swarm: true }, { id: 'idle', pools: ['idle'] as Pool[] },
+    ];
     for (let seed = 1; seed <= 20; seed++) {
-      const d = new Director(SCENES, seed);
-      let cur = d.update(input())!;
-      while (fam(cur.sceneId) !== 'geometric') cur = d.update(input({ bar: cur.bar + 64, barLine: true }))!;
-      const t = cur.time + 5;
-      expect(d.update(input({ time: t, bar: cur.bar + 1, surge: true }))).toBeNull();
-      const dec = d.update(input({ time: t + 1, bar: cur.bar + 2, barLine: true, surge: true }))!;
-      expect(dec.event).toBe('surge');
-      expect(fam(dec.sceneId)).toBe('psychedelic');
-      expect(dec.crossfadeBeats).toBe(CONFIG.director.crossfadeBeats.surge);
-      expect(d.update(input({ time: t + 3, bar: cur.bar + 3, barLine: true, surge: true }))).toBeNull(); // a preset already shows
-    }
-  });
-
-  it('rotates to a preset while a surge lasts', () => {
-    for (let seed = 1; seed <= 20; seed++) {
-      const d = new Director(SCENES, seed);
-      d.update(input({ surge: true }));
-      const dec = d.update(input({ time: 200, bar: 64, barLine: true, surge: true }))!;
-      expect(fam(dec.sceneId)).toBe('psychedelic');
+      const d = new Director(scenes, seed);
+      const start = d.update(input())!;
+      const dec = d.update(input({ time: CONFIG.director.minStayS, bar: 1, barLine: true, character: 'peak' }))!;
+      expect(dec.sceneId).toBe('ps');
+      expect(dec.crossfadeBeats).toBe(start.sceneId === 'g1' ? CONFIG.director.crossfadeBeats.character : CONFIG.director.morphBeats);
     }
   });
 
@@ -128,7 +117,7 @@ describe('Director', () => {
     expect(enter.crossfadeS).toBe(4);
     const leave = d.update(input({ time: 9 }))!;
     expect(leave.event).toBe('audio-returns');
-    expect(isMain(leave.sceneId)).toBe(true);
+    expect(fam(leave.sceneId)).toBe('main');
   });
 
   it('cuts on the drop even without a tempo', () => {
@@ -142,7 +131,7 @@ describe('Director', () => {
     const d = new Director(SCENES, 1);
     d.update(input({ bpm: null }));
     const dec = d.update(input({ time: 3, bpm: null, breakdown: true }))!;
-    expect(fam(dec.sceneId)).toBe('organic');
+    expect(fam(dec.sceneId)).toBe('breakdown');
     expect(dec.crossfadeS).toBe(4);
   });
 
@@ -158,46 +147,33 @@ describe('Director', () => {
         shown.push(dec.sceneId);
       }
     }
-    const geometric = shown.filter((id) => fam(id) === 'geometric');
+    const geometric = shown.filter((id) => fam(id) === 'main');
     expect(new Set(geometric.slice(0, 3)).size).toBe(3); // all three geometric scenes before any repeat
   });
 
-  it('mixes presets into main at about the configured share, never geometric into peak', () => {
+  it('keeps main geometric and peak psychedelic', () => {
     const d = new Director(SCENES, 3);
-    const main = [d.update(input())!.sceneId];
-    for (let bar = 1; bar <= 64 * 600; bar++) {
+    expect(fam(d.update(input())!.sceneId)).toBe('main');
+    for (let bar = 1; bar <= 64 * 50; bar++) {
       const dec = d.update(input({ bar, barLine: true }));
-      if (dec) main.push(dec.sceneId);
+      if (dec) expect(fam(dec.sceneId)).toBe('main');
     }
-    const share = main.filter((id) => fam(id) === 'psychedelic').length / main.length;
-    expect(share).toBeGreaterThan(CONFIG.director.mainPresetShare - 0.07);
-    expect(share).toBeLessThan(CONFIG.director.mainPresetShare + 0.07);
-
     const p = new Director(SCENES, 3);
     p.update(input({ character: 'peak' }));
     for (let bar = 1; bar <= 64 * 50; bar++) {
       const dec = p.update(input({ bar, barLine: true, character: 'peak' }));
-      if (dec) expect(fam(dec.sceneId)).toBe('psychedelic');
-    }
-  });
-
-  it('keeps main geometric when there are no presets (Butterchurn broken)', () => {
-    const d = new Director(SCENES.filter((s) => s.family !== 'psychedelic'), 1);
-    expect(fam(d.update(input())!.sceneId)).toBe('geometric');
-    for (let bar = 1; bar <= 64 * 20; bar++) {
-      const dec = d.update(input({ bar, barLine: true }));
-      if (dec) expect(fam(dec.sceneId)).toBe('geometric');
+      if (dec) expect(fam(dec.sceneId)).toBe('peak');
     }
   });
 
   it('keeps a lone scene rather than rotating to itself', () => {
-    const d = new Director([{ id: 'g1', family: 'geometric' }, { id: 'idle', family: 'idle' }], 1);
+    const d = new Director([{ id: 'g1', pools: ['main'] }, { id: 'idle', pools: ['idle'] }], 1);
     d.update(input());
     expect(d.update(input({ bar: 64, barLine: true }))).toBeNull();
   });
 
-  it('falls back to idle when a family has no scenes (Butterchurn broken)', () => {
-    const d = new Director(SCENES.filter((s) => s.family !== 'psychedelic'), 1);
+  it('falls back to idle when a family has no scenes', () => {
+    const d = new Director(SCENES.filter((s) => !s.pools.includes('peak')), 1);
     d.update(input());
     const dec = d.update(input({ bar: 1, barLine: true, character: 'peak' }))!;
     expect(dec.sceneId).toBe('idle');
@@ -232,8 +208,8 @@ describe('Director', () => {
 describe('Director in an ambient interlude', () => {
   // o2 and p2 also show in rotation; p3 shows only in interludes.
   const IL = [
-    ...SCENES.map((s) => (s.id === 'o2' || s.id === 'p2' ? { ...s, interlude: 'also' as const } : s)),
-    { id: 'p3', family: 'psychedelic' as const, interlude: 'only' as const },
+    ...SCENES.map((s) => (s.id === 'o2' || s.id === 'p2' ? { ...s, pools: [...s.pools, 'interlude' as const] } : s)),
+    { id: 'p3', pools: ['interlude' as Pool] },
   ];
   const POOL = ['o2', 'p2', 'p3'];
   const entered = () => {
@@ -265,7 +241,7 @@ describe('Director in an ambient interlude', () => {
     const { d } = entered();
     const dec = d.update(input({ time: 30 }))!;
     expect(dec.event).toBe('interlude-ends');
-    expect(isMain(dec.sceneId)).toBe(true);
+    expect(fam(dec.sceneId)).toBe('main');
     expect(dec.crossfadeS).toBe(0);
   });
 
@@ -273,23 +249,94 @@ describe('Director in an ambient interlude', () => {
     const d = new Director(IL, 3);
     const shown = [d.update(input())!.sceneId];
     for (let bar = 1; bar <= 2000; bar++) {
-      const dec = d.update(input({ time: bar * 2, bar, barLine: true, character: bar > 1000 ? 'peak' : 'main', breakdown: bar % 100 > 90, surge: bar % 50 > 45 }));
+      const dec = d.update(input({ time: bar * 2, bar, barLine: true, character: bar > 1000 ? 'peak' : 'main', breakdown: bar % 100 > 90 }));
       if (dec) shown.push(dec.sceneId);
     }
     expect(shown).not.toContain('p3');
     expect(shown).toContain('p2');
   });
 
-  it('gives way to silence, and wins over a breakdown and a surge', () => {
+  it('gives way to silence, and wins over a breakdown', () => {
     const { d } = entered();
     expect(d.update(input({ time: 10, interlude: true, idle: true }))!.event).toBe('silence');
     expect(POOL).toContain(d.update(input({ time: 15, interlude: true, breakdown: true }))!.sceneId);
-    expect(d.update(input({ time: 16, bar: 1, barLine: true, interlude: true, surge: true }))).toBeNull();
   });
 
   it('is ignored when no scene is in the interlude pool', () => {
     const d = new Director(SCENES, 1);
     d.update(input());
     expect(d.update(input({ time: 5, interlude: true }))).toBeNull();
+  });
+});
+
+describe('Director in dark sections', () => {
+  // d1/d2 show only in dark; g3 shows in main and dark.
+  const DK = [
+    ...SCENES.map((s) => (s.id === 'g3' ? { ...s, pools: ['main', 'dark'] as Pool[] } : s)),
+    { id: 'd1', pools: ['dark'] as Pool[] }, { id: 'd2', pools: ['dark'] as Pool[] },
+  ];
+  const darkPool = ['g3', 'd1', 'd2'];
+
+  it('draws from the dark pool, at the next bar line after the minimum stay', () => {
+    const d = new Director(DK, 1);
+    d.update(input());
+    const stay = CONFIG.director.minStayS;
+    expect(d.update(input({ time: stay - 1, bar: 1, barLine: true, character: 'dark' }))).toBeNull();
+    expect(d.update(input({ time: stay, bar: 1, barLine: false, character: 'dark' }))).toBeNull();
+    const dec = d.update(input({ time: stay + 1, bar: 2, barLine: true, character: 'dark' }))!;
+    expect(dec.event).toBe('character');
+    expect(darkPool).toContain(dec.sceneId);
+  });
+
+  it('rotates within dark and never shows a dark-only scene in main', () => {
+    const d = new Director(DK, 2);
+    const shown: string[] = [d.update(input({ character: 'dark' }))!.sceneId];
+    for (let bar = 1; bar <= 64 * 6; bar++) {
+      const dec = d.update(input({ bar, barLine: true, character: 'dark' }));
+      if (dec) shown.push(dec.sceneId);
+    }
+    expect(shown.every((id) => darkPool.includes(id))).toBe(true);
+    const m = new Director(DK, 2);
+    const main: string[] = [m.update(input())!.sceneId];
+    for (let bar = 1; bar <= 64 * 6; bar++) {
+      const dec = m.update(input({ bar, barLine: true }));
+      if (dec) main.push(dec.sceneId);
+    }
+    expect(main).not.toContain('d1');
+    expect(main).not.toContain('d2');
+  });
+
+  it('does not re-pick a scene shared by main and dark when main turns dark', () => {
+    for (let seed = 1; seed <= 30; seed++) {
+      const d = new Director(DK, seed);
+      const start = d.update(input())!;
+      const dec = d.update(input({ time: 100, bar: 1, barLine: true, character: 'dark' }))!;
+      expect(dec.sceneId).not.toBe(start.sceneId);
+    }
+  });
+
+  // As in main today: the drop's peak scene holds, and dark resumes underneath at the next rotation (64 bars).
+  it('lands a drop in a dark stretch on peak, then rotates back into dark', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const d = new Director(DK, seed);
+      d.update(input({ character: 'dark' }));
+      d.update(input({ time: 10, bar: 1, barLine: true, character: 'dark', breakdown: true }));
+      const drop = d.update(input({ time: 30, bar: 9, character: 'dark' }))!;
+      expect(drop.event).toBe('drop');
+      expect(fam(drop.sceneId)).toBe('peak');
+      expect(d.update(input({ time: 30 + CONFIG.director.minStayS, bar: 40, barLine: true, character: 'dark' }))).toBeNull();
+      const back = d.update(input({ time: 200, bar: 9 + CONFIG.director.rotateBars, barLine: true, character: 'dark' }))!;
+      expect(back.event).toBe('rotate');
+      expect(darkPool).toContain(back.sceneId);
+    }
+  });
+
+  it('shows main when the dark pool is empty or all of it has failed', () => {
+    const d = new Director(SCENES, 1);
+    expect(fam(d.update(input({ character: 'dark' }))!.sceneId)).toBe('main');
+    const f = new Director(DK, 1);
+    for (const id of darkPool) f.disable(id, input({ character: 'dark' }));
+    const dec = f.update(input({ time: 1, character: 'dark' }))!;
+    expect(fam(dec.sceneId)).toBe('main');
   });
 });

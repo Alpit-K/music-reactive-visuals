@@ -7,3 +7,5 @@ __pycache__/
 .pytest_cache/
 # Spike code lives at tag phase-0-spike; its ignored leftovers stay out of V1.
 /spike/
+# Reference screenshots of unlicensed work — redraw from them, never commit them.
+/refs/

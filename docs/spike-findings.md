@@ -13,7 +13,7 @@
 
 ## 1. Audio routing
 
-**rekordbox + FLX4 (2026-10-01).** rekordbox 7.2.16.0342, macOS 27.0, capture page in Comet 153.0.8010.191 (Chromium-based — the user's browser, not Chrome). PC MASTER OUT behaviour may change between rekordbox releases: re-run the PC MASTER OUT level checks after an update. All level checks used Spotify tracks; **local files were not tested** (design §10 row 0 names both).
+**rekordbox + FLX4 (2026-10-01).** rekordbox 7.2.16.0342, macOS 27.0, capture page in Comet 153.0.8010.191 (Chromium-based — the user's browser, not Chrome). PC MASTER OUT behaviour may change between rekordbox releases: after an update, re-check that the copy reaches BlackHole (Output on BlackHole, PC MASTER OUT on, meter moves with deck A — reopen rekordbox if not) and that cue does not leak (deck B cued with its fader down: headphones play B, meter stays at −120 dBFS). All level checks used Spotify tracks; **local files were not tested** (design §10 row 0 names both).
 
 | Check | Result |
 |---|---|
@@ -309,6 +309,39 @@ Kick-based measures fail because only 41–46% of detected onsets in the user's 
 **Interludes — not verified against notes.** 10 interludes, 13 min in all: 107, 17, 7, 282, 17, 101, 42, 24, 118 and 72 s, the first at 1 h 06. The user played ambient properly only once or twice. The rest were most likely breaks between songs, or an unmixed switch from techno to a chill track — music that is genuinely smooth, so the detector fired correctly, but the short spells (7–24 s) are a cut in and a hard cut out. Without timed notes the spans cannot be scored. The 15 s hold applies only on entry, so an interlude can end seconds after it starts (the 7 s one).
 
 **Peak:** 5 spells, ~19 min in total (175, 60, 80, 752 and 61 s), the longest 1 h 55–2 h 08. Unlabelled, so no verdict on the §5 model.
+
+## 9. rekordbox history and played tempo (2026-10-10)
+
+*Offline, no rekordbox running. Asked to ground "position in the set" in data rather than an assumed 30 minutes.*
+
+**Method.** A copy of rekordbox's library backup was read once, offline, with the user's approval: its play history (one entry per day, a timestamp per track) and each track's BPM, key and rekordbox's phrase **mood**. The live database is never opened, and nothing reads the library at runtime. 60 sessions of 40–100 minutes were used. No tracks are tagged, rated or coloured, so rekordbox's own analysis is all there is.
+
+**Mood does not follow set position.** High-mood share is 72–89% in every 10-minute slot; first half against second half, 25 sessions drop and 23 rise. Mid includes the ambient interludes (79, 94 BPM), which busyness already catches.
+
+**Tempo climbs** (track BPM, folded into 115–150 as the engine does; 60 sessions):
+
+| Minutes in | 0–10 | 10–20 | 20–30 | 30–40 | 40–50 | 50–60 | 60–70 |
+|---|---|---|---|---|---|---|---|
+| Median BPM | 128 | 132 | 130 | 131.5 | 135 | 138 | 136 |
+| Tracks ≥ 135 | 29% | 40% | 39% | 49% | 53% | 60% | 58% |
+
+38 of 59 sessions are faster in their second half. Sessions differ widely: 20 of 60 open at ≥ 135, 26 never play three fast tracks running, and in the rest the first fast run starts anywhere from minute 2 to 63. Asked what "deeper/darker" means in their sets, **the user said harder and faster** — so design §5's sparse "deep" was the wrong picture of their sets, and the climb is the signal (design §5 *dark*).
+
+**A launch clock would have been wrong.** On 2026-10-02 rekordbox's history runs continuously from 19:44, and dj-vj was launched at 20:59 — 75 minutes in. On 2026-10-09 the first track row came two minutes after launch. The two sets also share a 10-track run in the same order.
+
+**Played tempo, 10-02 replay** (`logs/20261002-205947/features.jsonl` through the real analysis): a smooth ramp — ~130 for minutes 0–3, 132–134 to 16, 136–138 to 30, 138–139.5 to 44, then 134–139. Sync flattens the track BPMs (a 126 BPM track played at ~137). A tempo was known in every 30 s slot after the first 15 s, within 1–2 BPM, apart from occasional 30 s dips to ~120 — the 3/4-beat misreads of §7. This set is dark minimal; the rumble failure of §7 (set 4) was not seen here.
+
+**Choosing the dark rule** (median of the clock's tempo over kick-playing seconds, simulated on the replay):
+
+| Window | Enter / leave | Dark spans | Dark minutes of 56 |
+|---|---|---|---|
+| 60 s | 136 / 133 | 17:12–24:16, 25:01–51:10, 53:52–end | 36 |
+| **120 s** | **136 / 133** | **17:39–52:16, 54:39–end** | **37** |
+| 120 s | 137 / 134 | 20:58–51:31 | 30 |
+
+The 60 s window let one 30 s misread drop dark for 45 s. The engine's own replay (`src/analysis/replay.test.ts`) prints dark 17:39–35:05, 36:34–52:38 and 54:27–end, with peak 35:05–36:34 outranking it.
+
+**Deferred (tier B):** polling the live `master.db` for the current track, to read its mood, key or phrases during a set. A third-party app does it on rekordbox 5–6 only; whether the history row is written at load or at play is unknown; two-deck blends need the FLX4 MIDI to know which deck is live (design Phase 2); and the phrase map cannot be lined up without the play position. Key (mostly minor in the user's sets) is parked with it.
 
 ## Starting configuration for V1
 
