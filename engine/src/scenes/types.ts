@@ -1,6 +1,8 @@
 export type Character = 'main' | 'peak' | 'dark';
 /** A moment of the set with its own scenes (design §6): `scenes/pools.ts` lists which. */
 export type Pool = 'main' | 'dark' | 'peak' | 'breakdown' | 'interlude' | 'idle';
+/** How a scene moves on screen (`scenes/pools.ts`): the director keeps to it and bridges a change (design §6). */
+export type Motion = 'still' | 'moving';
 
 export interface Features {
   sub: number; bass: number; mids: number; highs: number; // 0..1, each against its own trailing 30 s range (visuals only)

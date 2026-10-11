@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Director, type DirectorInput } from './director';
+import { Director, type DirectorInput, type DirectorScene } from './director';
 import { CONFIG } from '../config';
 import type { Pool } from '../scenes/types';
 
@@ -33,13 +33,13 @@ describe('Director', () => {
     expect(dec.crossfadeS).toBeCloseTo((8 * 60) / 128);
   });
 
-  it('lands the drop on a peak scene at once, without waiting for a bar line, as a hard cut', () => {
+  it('lands the drop in the music\'s own pool at once, without waiting for a bar line, as a hard cut', () => {
     const d = new Director(SCENES, 1);
     d.update(input());
     d.update(input({ bar: 1, barLine: true, breakdown: true }));
     const dec = d.update(input({ time: 20, bar: 1, barLine: false }))!;
     expect(dec.event).toBe('drop');
-    expect(fam(dec.sceneId)).toBe('peak');
+    expect(fam(dec.sceneId)).toBe('main');
     expect(dec.crossfadeBeats).toBe(0);
     expect(dec.crossfadeS).toBe(0);
   });
@@ -61,21 +61,42 @@ describe('Director', () => {
     expect(d.update(input({ time: stay, bar: 2, barLine: true, character: 'peak' }))!.event).toBe('character');
   });
 
-  it('lands a drop on the peak scene shown before the breakdown, with its seed, if there was one', () => {
-    const d = new Director(SCENES, 1);
-    const peak = d.update(input({ character: 'peak' }))!;
-    d.update(input({ time: 10, bar: 1, barLine: true, character: 'peak', breakdown: true }));
-    const back = d.update(input({ time: 30, bar: 9, character: 'peak' }))!;
-    expect(back.event).toBe('drop');
-    expect(back.sceneId).toBe(peak.sceneId);
-    expect(back.seed).toBe(peak.seed);
+  it('lands a drop on the scene shown before the breakdown, with its seed, if there was one', () => {
+    for (const character of ['main', 'peak'] as const) {
+      const d = new Director(SCENES, 1);
+      const before = d.update(input({ character }))!;
+      d.update(input({ time: 10, bar: 1, barLine: true, character, breakdown: true }));
+      const back = d.update(input({ time: 30, bar: 9, character }))!;
+      expect(back.event).toBe('drop');
+      expect(back.sceneId).toBe(before.sceneId);
+      expect(back.seed).toBe(before.seed);
+    }
+  });
 
+  it('keeps counting the returning scene\'s 64 bars from when it first showed', () => {
+    const d = new Director(SCENES, 1);
+    d.update(input());
+    d.update(input({ time: 10, bar: 40, barLine: true, breakdown: true }));
+    d.update(input({ time: 30, bar: 48 }));
+    expect(d.update(input({ time: 100, bar: 64, barLine: true }))!.event).toBe('rotate');
+  });
+
+  it('picks afresh on a drop once the scene before the breakdown has had its 64 bars', () => {
+    const d = new Director(SCENES, 1);
+    const before = d.update(input())!;
+    d.update(input({ time: 10, bar: 60, barLine: true, breakdown: true }));
+    const drop = d.update(input({ time: 30, bar: 68 }))!;
+    expect(drop.event).toBe('drop');
+    expect(fam(drop.sceneId)).toBe('main');
+    expect(drop.sceneId).not.toBe(before.sceneId);
+  });
+
+  it('does not bring back a scene from outside the music\'s pool', () => {
     for (let seed = 1; seed <= 20; seed++) {
-      const g = new Director(SCENES.filter((s) => s.id !== 'p2'), seed); // geometric before the breakdown
-      let first = g.update(input())!;
-      while (fam(first.sceneId) !== 'main') first = g.update(input({ bar: (first.bar + 64), barLine: true }))!;
-      g.update(input({ time: 1000, bar: first.bar + 1, barLine: true, breakdown: true }));
-      expect(fam(g.update(input({ time: 1020, bar: first.bar + 9 }))!.sceneId)).toBe('peak');
+      const d = new Director(SCENES, seed);
+      d.update(input({ character: 'peak' }));
+      d.update(input({ time: 100, bar: 1, barLine: true, character: 'peak', breakdown: true }));
+      expect(fam(d.update(input({ time: 120, bar: 9 }))!.sceneId)).toBe('main');
     }
   });
 
@@ -85,13 +106,6 @@ describe('Director', () => {
     d.update(input({ time: 100, bar: 1, barLine: true, character: 'peak', breakdown: true }));
     d.update(input({ time: 130, bar: 9, character: 'peak' }));
     expect(d.update(input({ time: 132, bar: 10, barLine: true, character: 'main' }))).toBeNull();
-  });
-
-  it('drops to main when there are no peak scenes', () => {
-    const d = new Director(SCENES.filter((s) => !s.pools.includes('peak')), 1);
-    d.update(input());
-    d.update(input({ time: 10, bar: 1, barLine: true, breakdown: true }));
-    expect(fam(d.update(input({ time: 30, bar: 9 }))!.sceneId)).toBe('main');
   });
 
   it('morphs between two swarms over at least the morph length; other changes keep their crossfade', () => {
@@ -262,6 +276,16 @@ describe('Director in an ambient interlude', () => {
     expect(POOL).toContain(d.update(input({ time: 15, interlude: true, breakdown: true }))!.sceneId);
   });
 
+  it('does not start within half a minute of a drop: that smooth stretch was the breakdown', () => {
+    const d = new Director(IL, 1);
+    d.update(input());
+    d.update(input({ time: 10, bar: 1, barLine: true, breakdown: true }));
+    d.update(input({ time: 30, bar: 9 }));
+    const wait = CONFIG.director.interlude.afterDropS;
+    expect(d.update(input({ time: 30 + wait - 1, bar: 10, interlude: true }))).toBeNull();
+    expect(d.update(input({ time: 30 + wait, bar: 11, interlude: true }))!.event).toBe('interlude');
+  });
+
   it('is ignored when no scene is in the interlude pool', () => {
     const d = new Director(SCENES, 1);
     d.update(input());
@@ -315,19 +339,14 @@ describe('Director in dark sections', () => {
     }
   });
 
-  // As in main today: the drop's peak scene holds, and dark resumes underneath at the next rotation (64 bars).
-  it('lands a drop in a dark stretch on peak, then rotates back into dark', () => {
+  it('lands a drop in a dark stretch back in dark', () => {
     for (let seed = 1; seed <= 20; seed++) {
       const d = new Director(DK, seed);
       d.update(input({ character: 'dark' }));
       d.update(input({ time: 10, bar: 1, barLine: true, character: 'dark', breakdown: true }));
       const drop = d.update(input({ time: 30, bar: 9, character: 'dark' }))!;
       expect(drop.event).toBe('drop');
-      expect(fam(drop.sceneId)).toBe('peak');
-      expect(d.update(input({ time: 30 + CONFIG.director.minStayS, bar: 40, barLine: true, character: 'dark' }))).toBeNull();
-      const back = d.update(input({ time: 200, bar: 9 + CONFIG.director.rotateBars, barLine: true, character: 'dark' }))!;
-      expect(back.event).toBe('rotate');
-      expect(darkPool).toContain(back.sceneId);
+      expect(darkPool).toContain(drop.sceneId);
     }
   });
 
@@ -338,5 +357,117 @@ describe('Director in dark sections', () => {
     for (const id of darkPool) f.disable(id, input({ character: 'dark' }));
     const dec = f.update(input({ time: 1, character: 'dark' }))!;
     expect(fam(dec.sceneId)).toBe('main');
+  });
+});
+
+describe('Director keeping to a motion', () => {
+  // Main: three moving, two still. Peak: moving. Interlude: b1 moves (the bridge), q1 is still.
+  const MV: DirectorScene[] = [
+    { id: 'm1', pools: ['main'], motion: 'moving' }, { id: 'm2', pools: ['main'], motion: 'moving' }, { id: 'm3', pools: ['main'], motion: 'moving' },
+    { id: 's1', pools: ['main'], motion: 'still' }, { id: 's2', pools: ['main'], motion: 'still' },
+    { id: 'p1', pools: ['peak'], motion: 'moving' }, { id: 'p2', pools: ['peak'], motion: 'moving' },
+    { id: 'o1', pools: ['breakdown'], motion: 'still' },
+    { id: 'b1', pools: ['interlude'], motion: 'moving' }, { id: 'q1', pools: ['interlude'], motion: 'still' },
+    { id: 'idle', pools: ['idle'] },
+  ];
+  const motion = (id: string) => MV.find((s) => s.id === id)?.motion;
+  const rotations = (seed: number, bars: number) => {
+    const d = new Director(MV, seed);
+    const out = [d.update(input())!];
+    for (let bar = 1; bar <= bars; bar++) {
+      const dec = d.update(input({ time: bar * 2, bar, barLine: true }));
+      if (dec) out.push({ ...dec });
+    }
+    return out;
+  };
+
+  it('never changes between still and moving except through a bridge, which a moving interlude scene fills', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const out = rotations(seed, 64 * 30);
+      for (let k = 1; k < out.length; k++) {
+        const [a, b] = [out[k - 1], out[k]];
+        if (b.event === 'bridge') expect(b.sceneId).toBe('b1');
+        else if (a.event !== 'bridge') expect(motion(b.sceneId), `${a.sceneId} → ${b.sceneId}`).toBe(motion(a.sceneId));
+      }
+      expect(out.some((d) => d.event === 'bridge')).toBe(true);
+    }
+  });
+
+  it('holds the bridge for its bars, then lands on the other motion at a bar line with the event that called it', () => {
+    const out = rotations(1, 64 * 30);
+    const k = out.findIndex((d) => d.event === 'bridge');
+    const [before, bridge, after] = out.slice(k - 1, k + 2);
+    expect(after.bar - bridge.bar).toBe(CONFIG.director.bridgeBars);
+    expect(after.event).toBe('rotate');
+    expect(motion(after.sceneId)).not.toBe(motion(before.sceneId));
+    expect(MV.find((s) => s.id === after.sceneId)!.pools).toEqual(['main']);
+  });
+
+  it('shows every scene of the pool once a round, one motion run each', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const main = rotations(seed, 64 * 30).filter((d) => d.event !== 'bridge').map((d) => d.sceneId);
+      expect(new Set(main.slice(0, 5)).size).toBe(5);
+      expect(new Set(main.slice(5, 10)).size).toBe(5);
+      let run = 1;
+      for (let k = 1; k < main.length; k++) {
+        run = motion(main[k]) === motion(main[k - 1]) ? run + 1 : 1;
+        expect(run, main.join(' ')).toBeLessThanOrEqual(3); // no still run twice over at a round's turn
+      }
+    }
+  });
+
+  it('lands a character change from a moving scene on a moving one: no black hole → romanesco', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const d = new Director(MV, seed);
+      d.update(input({ character: 'peak' }));
+      const dec = d.update(input({ time: 100, bar: 1, barLine: true }))!;
+      expect(dec.event).toBe('character');
+      expect(motion(dec.sceneId)).toBe('moving');
+    }
+  });
+
+  it('bridges a character change when the new pool has nothing of the same motion', () => {
+    const d = new Director(MV.map((s) => (s.pools.includes('main') ? { ...s, motion: 'still' as const } : s)), 1);
+    d.update(input());
+    const dec = d.update(input({ time: 100, bar: 1, barLine: true, character: 'peak' }))!;
+    expect(dec.event).toBe('bridge');
+    const after = d.update(input({ time: 120, bar: 1 + CONFIG.director.bridgeBars, barLine: true, character: 'peak' }))!;
+    expect(after.event).toBe('character');
+    expect(MV.find((s) => s.id === after.sceneId)!.pools).toEqual(['peak']);
+  });
+
+  it('leaves the music\'s own changes alone: a drop from a still breakdown is never bridged', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const d = new Director(MV, seed);
+      d.update(input());
+      d.update(input({ time: 10, bar: 60, barLine: true, breakdown: true }));
+      const drop = d.update(input({ time: 30, bar: 68 }))!;
+      expect(drop.event).toBe('drop');
+      expect(MV.find((s) => s.id === drop.sceneId)!.pools).toContain('main');
+    }
+  });
+
+  it('drops a bridge when the pool changes under it', () => {
+    const out = rotations(1, 64 * 30);
+    const k = out.findIndex((d) => d.event === 'bridge');
+    const d = new Director(MV, 1);
+    d.update(input());
+    for (let bar = 1; bar <= out[k].bar; bar++) d.update(input({ time: bar * 2, bar, barLine: true }));
+    const brk = d.update(input({ time: 1e4, bar: out[k].bar + 1, barLine: true, breakdown: true }))!;
+    expect(brk.event).toBe('breakdown');
+    const drop = d.update(input({ time: 1e4 + 30, bar: out[k].bar + 9 }))!;
+    expect(drop.event).toBe('drop');
+    expect(d.update(input({ time: 1e4 + 40, bar: out[k].bar + 9 + CONFIG.director.bridgeBars, barLine: true }))).toBeNull();
+  });
+
+  it('changes straight across when there is no moving interlude scene to bridge with', () => {
+    const out = (() => {
+      const d = new Director(MV.filter((s) => s.id !== 'b1'), 1);
+      const o = [d.update(input())!];
+      for (let bar = 1; bar <= 64 * 30; bar++) { const dec = d.update(input({ bar, barLine: true })); if (dec) o.push(dec); }
+      return o;
+    })();
+    expect(out.some((d) => d.event === 'bridge')).toBe(false);
+    expect(new Set(out.map((d) => motion(d.sceneId))).size).toBe(2);
   });
 });

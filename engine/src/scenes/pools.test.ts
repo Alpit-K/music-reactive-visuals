@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { POOLS, poolsOf } from './pools';
+import { MOTION, motionOf, POOLS, poolsOf } from './pools';
 import { loadShaderScenes } from './registry';
 
 describe('pools', () => {
@@ -15,6 +15,18 @@ describe('pools', () => {
 
   it('has an idle scene', () => {
     expect(POOLS.idle.length).toBeGreaterThan(0);
+  });
+
+  it('rates every enabled scene but idle as still or moving, once', () => {
+    for (const id of enabled) {
+      if (poolsOf(id).includes('idle')) expect(motionOf(id), id).toBeUndefined();
+      else expect([...MOTION.still, ...MOTION.moving].filter((m) => m === id), id).toHaveLength(1);
+    }
+    for (const id of [...MOTION.still, ...MOTION.moving]) expect(enabled).toContain(id);
+  });
+
+  it('has a moving interlude scene to bridge with', () => {
+    expect(POOLS.interlude.some((id) => motionOf(id) === 'moving')).toBe(true);
   });
 
   it('lists every pool a scene is in, in pool order', () => {

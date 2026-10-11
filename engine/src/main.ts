@@ -6,7 +6,7 @@ import { Director, type Decision, type DirectorInput } from './director/director
 import { overlayText } from './overlay';
 import { Compositor } from './render/compositor';
 import { FrameWatch } from './render/frameWatch';
-import { POOLS, poolsOf } from './scenes/pools';
+import { motionOf, POOLS, poolsOf } from './scenes/pools';
 import { loadShaderScenes } from './scenes/registry';
 import { SILENT, type Features, type Scene } from './scenes/types';
 import { loadCarry, saveCarry } from './session/carry';
@@ -80,7 +80,7 @@ async function start() {
       navigator.mediaDevices.addEventListener('devicechange', () => {
         guard.lastAudioS = Math.min(guard.lastAudioS ?? 0, nowS() - CONFIG.stream.silentS); // recheck now
       });
-      director = new Director([...scenes.values()].map((s) => ({ id: s.id, pools: poolsOf(s.id), swarm: s.morphFrom !== undefined })), Number(session.replace(/\D/g, '').slice(-9)));
+      director = new Director([...scenes.values()].map((s) => ({ id: s.id, pools: poolsOf(s.id), swarm: s.morphFrom !== undefined, motion: motionOf(s.id) })), Number(session.replace(/\D/g, '').slice(-9)));
       for (const id of carry.disabled) director.disable(id, input);
     } catch (e) {
       sceneLog.push({ time: nowS(), event: 'audio-unavailable', error: String(e) });

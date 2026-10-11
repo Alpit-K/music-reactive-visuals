@@ -5,7 +5,8 @@ const db = (x: number) => 20 * Math.log10(x + 1e-9);
 /**
  * Ambient interludes (design §5): smooth sound, read as low busyness — how far the bass, mids and highs
  * rise from frame to frame. It ignores kicks and tempo, which ambient music fakes and rumbling techno
- * hides (spike-findings §7). Slow in (30 s window, then a 15 s hold), quicker out (8 s window).
+ * hides (spike-findings §7). Slow in (30 s window, then a 15 s hold), quicker out (8 s window). The window
+ * is read from 10 s in, so a session that opens on ambient music does not wait for it to fill.
  */
 export class Interlude {
   private prev: number[] | null = null;
@@ -32,11 +33,11 @@ export class Interlude {
   }
 
   private closeSecond(): void {
-    const { windowS, shortS, enterBelow, holdS, leaveAbove } = CONFIG.interlude;
+    const { windowS, minS, shortS, enterBelow, holdS, leaveAbove } = CONFIG.interlude;
     if (this.sum.rms / this.count > CONFIG.idle.db) {
       this.seconds.push(this.sum.rise / this.count);
       if (this.seconds.length > windowS) this.seconds.shift();
-      if (this.seconds.length === windowS) {
+      if (this.seconds.length >= minS) {
         const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
         this.busyness = mean(this.seconds);
         const recent = mean(this.seconds.slice(-shortS));

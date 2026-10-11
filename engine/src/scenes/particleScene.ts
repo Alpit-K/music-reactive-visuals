@@ -393,11 +393,11 @@ vec3 shape(int s, vec3 r, vec2 q, float t, float seed, inout float sz, inout flo
     hu = 1.2 * back;
     return c + 0.07 * (1.0 - back) * (cos(b) * n1 + sin(b) * n2);
   }
-  if (s == 31) {                                          // pearl fringe: feathers grow in from the screen's edge
+  if (s == 31) {                                          // pearl fringe: feathers grow in from the screen's edge, most of the way to the centre and back
     float W = 2.1, H = 1.2, e = r.x * 2.0 * (W + H), side = e < W ? 0.0 : e < W + H ? 1.0 : e < 2.0 * W + H ? 2.0 : 3.0;
     vec2 at = side == 0.0 ? vec2(e * 2.0 - W, -H) : side == 1.0 ? vec2(W, (e - W) * 2.0 - H) : side == 2.0 ? vec2(W - (e - W - H) * 2.0, H) : vec2(-W, H - (e - 2.0 * W - H) * 2.0);
     vec2 in_ = side == 0.0 ? vec2(0.0, 1.0) : side == 1.0 ? vec2(-1.0, 0.0) : side == 2.0 ? vec2(0.0, -1.0) : vec2(1.0, 0.0);
-    float len = (0.25 + 0.35 * (0.5 + 0.5 * sin(13.0 * e + seededBy(seed, 40.0) * 6.0))) * (0.75 + 0.25 * sin(t * 0.3 + 7.0 * e));
+    float len = (0.45 + 0.6 * (0.5 + 0.5 * sin(13.0 * e + seededBy(seed, 40.0) * 6.0))) * (0.75 + 0.25 * sin(t * 0.3 + 7.0 * e)) * (1.05 + 0.15 * sin(t * 0.12));
     float d = len * pow(r.y, 0.7);
     vec2 p = at + in_ * d + vec2(in_.y, -in_.x) * 0.05 * sin(30.0 * d + 40.0 * e);   // barbs off each feather
     sz = fract(r.z * 23.0) < 0.1 ? 2.0 : 0.8;
@@ -479,7 +479,9 @@ vec3 shape(int s, vec3 r, vec2 q, float t, float seed, inout float sz, inout flo
     vec2 g = screenGrid(q);
     vec2 p = g * 1.1;
     float tt = t * 0.25 + 0.12 * (floor(u_beat) + smoothstep(0.0, 0.35, fract(u_beat))) + seededBy(seed, 56.0) * 50.0;
-    float w = 4.5 * (1.0 + 0.25 * u_bass);
+    // The folds widen with the smoothed bass, not hit by hit: on u_bass every bass note reshuffled the whole pattern,
+    // and the flash limiter damped plasma 75% and liquid 53% of their screen time live (2026-10-10).
+    float w = 4.5 * (1.0 + 0.25 * u_swell);
     vec2 f1 = vec2(fbm(p + tt, seed), fbm(p + vec2(5.2, 1.3) - tt, seed));
     vec2 f2 = vec2(fbm(p + w * f1 + vec2(1.7, 9.2) + 0.6 * tt, seed), fbm(p + w * f1 + vec2(8.3, 2.8) - 0.6 * tt, seed));
     float h = fbm(p + w * f2, seed);
@@ -581,7 +583,7 @@ vec3 shape(int s, vec3 r, vec2 q, float t, float seed, inout float sz, inout flo
     float rad = length(g), ang = atan(g.y, g.x);
     vec2 p = vec2(abs(mod(ang + t * 0.05, 2.0 * PI) - PI) * 1.2, 0.8 / max(rad, 0.05) + t * 0.6);
     float tt = t * 0.2 + 0.1 * (floor(u_beat) + smoothstep(0.0, 0.35, fract(u_beat))) + seededBy(seed, 65.0) * 50.0;
-    float w = 3.5 * (1.0 + 0.25 * u_bass);
+    float w = 3.5 * (1.0 + 0.25 * u_swell);   // smoothed bass, as the liquid's
     vec2 f1 = vec2(fbm(p + tt, seed), fbm(p + vec2(5.2, 1.3) - tt, seed));
     vec2 f2 = vec2(fbm(p + w * f1 + vec2(1.7, 9.2) + 0.6 * tt, seed), fbm(p + w * f1 + vec2(8.3, 2.8) - 0.6 * tt, seed));
     float h = fbm(p + w * f2, seed);

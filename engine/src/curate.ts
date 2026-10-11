@@ -2,7 +2,7 @@ import { Analysis } from './analysis/analysis';
 import { openBlackHole } from './audio/capture';
 import { CONFIG } from './config';
 import { Compositor } from './render/compositor';
-import { poolsOf } from './scenes/pools';
+import { motionOf, POOLS, poolsOf } from './scenes/pools';
 import { loadShaderScenes } from './scenes/registry';
 import { SILENT, type Features } from './scenes/types';
 
@@ -46,9 +46,28 @@ async function run(audio: { ctx: AudioContext; source: AudioNode; analyser: Anal
   let i = 0;
   let features: Features = SILENT;
   const show = () => compositor.show(list[i], 1, 0.5, (performance.now() - t0) / 1000);
-  show();
+
+  // ?pair=<a>,<b>: the two scenes take turns every 16 bars, each change through a moving interlude scene shown for
+  // the bridge length — b cycles it, 0 being straight across — to judge how a still ↔ moving change should go (design §6).
+  const byId = new Map(loadShaderScenes().map((s) => [s.id, s]));
+  const pair = new URLSearchParams(location.search).get('pair')?.split(',').map((id) => byId.get(id)!);
+  const bridges = POOLS.interlude.filter((id) => motionOf(id) === 'moving').map((id) => byId.get(id)!);
+  const lengths = [0, 4, 8, 16, CONFIG.director.rotateBars];
+  let li = lengths.indexOf(CONFIG.director.bridgeBars);
+  const turn = { end: 0, bridging: false, bridges: 0, bars: 0, seed: 1 };
+  const bridge = () => bridges[(turn.bridges - 1) % bridges.length];
+  const showPair = (t: number) => {
+    compositor.show(turn.bridging ? bridge() : pair![turn.end], turn.seed++, (CONFIG.director.morphBeats * 60) / (features.bpm ?? 128), t);
+  };
+  if (pair) showPair(0);
+  else show();
 
   window.addEventListener('keydown', async (e) => {
+    if (pair) {
+      if (e.key === 'b') li = (li + 1) % lengths.length;
+      if (e.key === 'f') await document.documentElement.requestFullscreen();
+      return;
+    }
     if (e.key === 'ArrowRight') i = (i + 1) % list.length;
     else if (e.key === 'ArrowLeft') i = (i - 1 + list.length) % list.length;
     else if (e.key === 'f') {
@@ -64,6 +83,26 @@ async function run(audio: { ctx: AudioContext; source: AudioNode; analyser: Anal
     audio.analyser.getFloatTimeDomainData(wave);
     features = analysis.frame(t, freq, wave, audio.ctx.sampleRate);
     compositor.render(t, features);
+    if (pair) {
+      if (features.barLine) turn.bars++;
+      if (turn.bars >= (turn.bridging ? lengths[li] : 16)) {
+        turn.bars = 0;
+        turn.bridging = !turn.bridging && lengths[li] > 0;
+        if (turn.bridging) turn.bridges++;
+        else turn.end = 1 - turn.end;
+        showPair(t);
+      }
+      const now = turn.bridging ? `bridge ${bridge().id}` : pair[turn.end].id;
+      $('hud').textContent = [
+        `${pair.map((p) => `${p.id} (${motionOf(p.id)})`).join('  ⇄  ')}`,
+        `now: ${now}  bar ${turn.bars}  bridge ${lengths[li] || 'none — straight across'}${lengths[li] ? ' bars' : ''}`,
+        `bpm ${features.bpm?.toFixed(1) ?? '—'}${compositor.damped ? '  FLASH-DAMPED' : ''}`,
+        'b bridge length   f fullscreen',
+        ...errors.slice(-3),
+      ].join('\n');
+      requestAnimationFrame(frame);
+      return;
+    }
     const s = list[i];
     const on = s.enabled ? 'enabled' : 'disabled';
     $('hud').textContent = [

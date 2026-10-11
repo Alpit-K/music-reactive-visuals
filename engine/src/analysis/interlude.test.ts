@@ -14,10 +14,10 @@ function drive(seconds: number, bands: (t: number, frame: number) => number[], r
 }
 
 describe('Interlude', () => {
-  it('has no busyness before 30 playing seconds', () => {
+  it('has no busyness before 10 playing seconds', () => {
     const at = drive(40, SMOOTH);
-    expect(at(29).busyness).toBeNull();
-    expect(at(32).busyness).not.toBeNull();
+    expect(at(9).busyness).toBeNull();
+    expect(at(12).busyness).not.toBeNull();
   });
 
   it('reads 1.5 for bands that jump 12 dB every eighth frame, and never calls it an interlude', () => {
@@ -26,10 +26,18 @@ describe('Interlude', () => {
     expect(at(119).interlude).toBe(false);
   });
 
-  it('enters once smooth sound has filled the window and held 15 s more', () => {
+  it('at the start of a session, enters after 10 s of smooth sound and a 15 s hold', () => {
+    // The 2026-10-10 set waited 44 s for the window to fill first (spike-findings §10).
     const at = drive(60, SMOOTH);
-    expect(at(40).interlude).toBe(false);
-    expect(at(47).interlude).toBe(true);
+    expect(at(24).interlude).toBe(false);
+    expect(at(27).interlude).toBe(true);
+  });
+
+  it('mid-set, still needs ~27 s of smooth sound after busy music', () => {
+    // The 30 s mean falls below 0.9 ~12 s in, then the 15 s hold.
+    const at = drive(130, (t, f) => (t < 60 ? BUSY(f) : SMOOTH()));
+    expect(at(85).interlude).toBe(false);
+    expect(at(89).interlude).toBe(true);
   });
 
   it('ends within 8 s of the music turning busy again', () => {

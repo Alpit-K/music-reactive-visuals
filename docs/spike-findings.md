@@ -343,6 +343,28 @@ The 60 s window let one 30 s misread drop dark for 45 s. The engine's own replay
 
 **Deferred (tier B):** polling the live `master.db` for the current track, to read its mood, key or phrases during a set. A third-party app does it on rekordbox 5–6 only; whether the history row is written at load or at play is unknown; two-deck blends need the FLX4 MIDI to know which deck is live (design Phase 2); and the phrase map cannot be lined up without the play position. Key (mostly minor in the user's sets) is parked with it.
 
+## 10. Live set on pools and swarms (2026-10-10)
+
+**Session `logs/20261010-180712/`**, 66 min (18:07–19:13), launched from `VJ.app`, relaxed music throughout, timed notes from the user during the set. First set on the pools, dark and swarm-to-swarm morphs.
+
+**Performance — clean.** 60 fps, no gaps in `t`, render scale 1 throughout; 12 single frames over 20 ms, almost all on a scene change. Morphs drew no complaint.
+
+**Tempo 120–133** (5-minute medians 127–133, with stretches reading 120). Dark never came, correctly for a relaxed set. The silence at 18:52:13–18:52:40 was real — the user paused the set.
+
+**Psychedelic took 22 of 66 minutes** — the most of any scene kind — while the character model said peak for ~2 (18:32:17–18:33:31 and 18:57:14–18:58:14). Every one of 12 drops landed on the peak pool. The user, live: plasma "shouldn't have been here in the first place"; volcano and black hole "too early … I am still playing relaxed music". A drop also returned to the peak scene shown before the breakdown and restarted the 64-bar count, so plasma held 18:16–18:22 over three drops and liquid 18:37–18:44 over four. **Fixed 2026-10-10** (design §6 *Drop*): the drop cuts back to the music's own pool.
+
+**Breakdown scenes on screen 1–37 s.** The breakdown flag needs 8 bars without a kick (~15 s at 128) before the scene changes, so a "0.9 s breakdown" in the log is a ~16 s kick gap whose organic scene the kick cut off within a second. Not shortened: the short on-screen spells were harmless once the drop stopped jumping to peak.
+
+**False peak at 18:32:17** — the user heard relaxed music; the clock read ~120. The peak model's first live label against it (design §11). The 18:57 spell could not be judged: the user did not remember the music.
+
+**Four changes in 35 s at 18:55:19–18:55:53:** breakdown (jellyfish) → drop (plasma) → interlude 3 s later (digital rain, a 15 s crossfade) → interlude ends 12 s later (mitosis, hard cut). Hypothesis: the 30 s busyness window was mostly the smooth breakdown, so it called an interlude just after the kick returned. Not testable on this set — sessions do not log features. **Fixed 2026-10-10** by the director: no interlude within `director.interlude.afterDropS` (30 s) of a drop.
+
+**Flash limiter:** damped 75% of plasma's screen time and 53% of liquid's — both flash hard enough at 128 BPM to run dimmed nearly throughout. **Fixed 2026-10-10:** the cause was the folds widening with `u_bass` — every bass note reshuffled the whole dot pattern. Measured headless on a synthetic 128 BPM track (kick, offbeat bass, hats, pad, a 30 s breakdown), share of frames damped, plasma / liquid: as built 27–34% / 7%; without the per-beat jolt 34%; half the tunnel speed 32%; brightness 4.0 → 2.5 16%; slower colour 35%; no kick or breathe 34%; **folds on the smoothed bass (`u_swell`) 4% / 0%**, shipped. Plasma damped *more* in the breakdown (39–48%), which ruled out the beat as the cause: `u_bass` is scaled to its trailing 30 s range, so in a quiet stretch small bass moves swing it fully. The synthetic track damps far less than the live set did (27% against 75%), so only a live set confirms the fix.
+
+**Interludes:** the user confirmed them working at 18:08 (after a 44 s lag: audio returned at 18:07:49 and the busyness window needs 30 s plus a 15 s hold — main shows meanwhile) and at 18:47. The 64-bar rotation 19:00–19:10 was "great".
+
+**Asked for, not built:** moving scenes not followed by still ones (black hole → romanesco at 18:33:31 jarred); knowing when two tracks play at once and when the track changes (19:09: a new, happy track kept the old scene — the clock fell 130 → 120 at the change); mood, so a happy relaxed track turns biological; pearl fringe reaching the centre (built 2026-10-10).
+
 ## Starting configuration for V1
 
 From `spike/logs/capture-20261001074825.config.json` and the `analyse.py` defaults (design §5):
