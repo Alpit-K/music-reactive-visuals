@@ -28,3 +28,23 @@ export const PALETTES = {
 } satisfies Record<string, Palette>;
 
 export type PaletteName = keyof typeof PALETTES;
+
+/**
+ * The option whose colours sit closest to those showing (`from`: flat RGB stops, first four used), so a change of
+ * scene drifts colour rather than jumping it (2026-11-12). Distance: stop-by-stop RGB distance, at the best of the four
+ * turns of the loop. The palette showing is skipped unless it is the only option; ties go to list order.
+ */
+export function nearestPalette(from: readonly number[], options: readonly PaletteName[]): PaletteName {
+  const stops = [0, 1, 2, 3].map((i) => from.slice(i * 3, i * 3 + 3));
+  const apart = (p: Palette, turn: number) =>
+    p.reduce((sum, c, i) => sum + Math.hypot(...c.map((v, k) => v - stops[(i + turn) % 4][k])), 0);
+  const same = (p: Palette) => apart(p, 0) < 1e-6;
+  const pool = options.length > 1 ? options.filter((n) => !same(PALETTES[n])) : options;
+  let best = pool[0] ?? options[0];
+  let bestD = Infinity;
+  for (const n of pool) {
+    const d = Math.min(...[0, 1, 2, 3].map((turn) => apart(PALETTES[n], turn)));
+    if (d < bestD) [best, bestD] = [n, d];
+  }
+  return best;
+}

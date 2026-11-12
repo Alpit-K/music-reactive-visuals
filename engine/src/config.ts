@@ -19,13 +19,43 @@ export const CONFIG = {
   // minS: the window is read once this many seconds are in — at a session's start it waited 44 s (2026-10-10 set).
   interlude: { windowS: 30, minS: 10, shortS: 8, enterBelow: 0.9, holdS: 15, leaveAbove: 1.3 },
   normaliseS: 30,
+  // The kick's ripple through a swarm (2026-11-12): it rose over 0.12 s and took 0.6 s to reach the edge, which read as
+  // late — the engine itself hears a kick ~21 ms after it lands (analysis/latency.test.ts). Stronger too: it was too faint.
+  ripple: { riseS: 0.03, edgeS: 0.35, gain: 0.9 },
+  // The swarms' dance (analysis/motion.ts, 2026-11-12). Groove eases toward its level while the kick plays — two kicks
+  // within 2 beats, so a lone kick in a breakdown does not start it; the drop is the first kick after 4 bars without one.
+  // Tension grows from 1 bar after the kick stops to full at 16 bars, more with the highs up (a riser). Without a tempo,
+  // beats and bars are counted at 128 BPM. No build before the first kick, in silence or an interlude, or past 32 bars out
+  // (2026-11-12 review: idle and interludes spun and brightened as if building).
+  motion: {
+    level: { main: 0.6, dark: 0.85, peak: 1.0 }, grooveS: 2, playingBeats: 2, burstGapBars: 4, fallbackBpm: 128,
+    tensionStartBars: 1, tensionBars: 16, tensionMaxBars: 32, highsS: 1, tensionReleaseS: 0.5, tensionTurnRate: 0.8,
+  },
+  // How the swarms dance with those (particleScene.ts, 2026-11-12), in shape units — the screen is about ±2.0 × ±1.13.
+  // Travel takes 2 bars across and 4 up and down; the dip lands on each beat; roll swings over a bar.
+  groove: { travelX: 0.45, travelY: 0.18, dip: 0.05, roll: 0.15, fillRoll: 0.25, fillGrow: 0.04 },
+  build: { tighten: 0.25, brighten: 0.5 },
+  burst: { scale: 2.2, outS: 0.1, backS: 1.5 }, // the drop: out in 0.1 s, back over 1.5 s
+  // Fullness (2026-11-12): a dim backdrop of dots behind object forms, and small copies of the form orbiting it while it
+  // grooves, so the screen is not one shape in black. Orbits in shape units, the screen being about ±2.0 × ±1.13.
+  fullness: {
+    // First look, headless: satellites at 0.3 on a 1.35 × 0.62 orbit crossed the lead sphere; the backdrop at 0.25 was
+    // barely visible.
+    backdrop: 5000, backdropAlpha: 0.6, satellites: 3, satelliteShare: 0.15, minPerSatellite: 600, satelliteScale: 0.22,
+    orbitX: 1.75, orbitY: 0.85, orbitBeats: 32,
+    // Troupe: three forms in a line, copies with half the lead's dots; mirror: lead and reflection side by side.
+    troupeShare: 0.5, troupeScale: 0.55, troupeGap: 1.3, mirrorScale: 0.6, mirrorGap: 1.0,
+  },
   swellS: 0.6, // time constant of the smoothed bass the swarms swell with (2026-10-09: raw bass made them bounce)
   director: {
     rotateBars: 64,
     minStayS: 60, // a character change waits this long after the last change, so a drop is not demoted at once
-    crossfadeBeats: { character: 4, breakdown: 8, drop: 0 }, // drop: a hard cut on the kick (2026-10-02)
-    morphBeats: 16, // a change between two swarms flows the points over at least this long (2026-10-09)
-    bridgeBars: 8, // a still ↔ moving change shows a moving interlude scene this long in between (user's pick on the curation page, 2026-10-10)
+    // A breakdown changes scene only once its flag has held this long (2026-11-12: none of 71 in five sets did); the
+    // drop then morphs back. A shorter one keeps the scene, which bursts on the drop (analysis/motion.ts).
+    longBreakdownS: 30,
+    afterDropBars: 8, // no rotation this soon after a drop
+    crossfadeBeats: { character: 4, breakdown: 8, drop: 4 },
+    morphBeats: 8, // a change between two swarms flows the points over at least this long (user's pick on the curation page, 2026-11-12; was 16)
     rotateBeats: { breakdown: 8, main: 4, dark: 4, peak: 8, idle: 8 },
     immediateCrossfadeS: 4,
     interlude: { rotateS: 120, crossfadeS: 15, afterDropS: 30 }, // slow on purpose: the user asked for slower than 60 s (2026-10-03)

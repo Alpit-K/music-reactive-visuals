@@ -5,6 +5,7 @@ import { CharacterModel } from './character';
 import { Interlude } from './interlude';
 import { BeatClock } from './clock';
 import { KickDetector } from './kicks';
+import { MotionFeatures } from './motion';
 import { Surge } from './surge';
 import { TimeWindow } from './timeWindow';
 
@@ -18,6 +19,7 @@ export class Analysis {
   private character = new CharacterModel();
   private surge = new Surge();
   private interlude = new Interlude();
+  private motion = new MotionFeatures();
   private norm = [0, 1, 2, 3].map(() => new TimeWindow(CONFIG.normaliseS));
   private lastKick = -Infinity;
   private swell = 0;
@@ -46,9 +48,10 @@ export class Analysis {
     const dt = this.lastT === null ? 0 : t - this.lastT;
     this.lastT = t;
     this.swell += (bass - this.swell) * (1 - Math.exp(-dt / CONFIG.swellS));
+    const motion = this.motion.update(t, kick, t - this.lastKick, clock.bpm, ch.character, highs, ch.idle || il.interlude);
 
     return {
-      sub, bass, swell: this.swell, mids, highs,
+      sub, bass, swell: this.swell, ...motion, mids, highs,
       kick,
       sinceKick: t - this.lastKick,
       bpm: clock.bpm,

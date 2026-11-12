@@ -37,10 +37,10 @@ describe('Compositor.show', () => {
     const calls: string[] = [];
     const c = new Compositor(fakeGl, () => {});
     const from = scene('a', calls);
-    const to: Scene = { ...scene('b', calls), morphFrom: (f, time, s) => { calls.push(`b.morphFrom ${f.id}@${time} for ${s}`); return true; } };
+    const to: Scene = { ...scene('b', calls), morphFrom: (f, time, s, colour) => { calls.push(`b.morphFrom ${f.id}@${time} for ${s}, colours ${colour}`); return true; } };
     c.show(from, 1, 0, 0);
-    c.show(to, 2, 7, 10);
-    expect(calls).toEqual(['a.init', 'b.init', 'b.morphFrom a@10 for 7', 'a.dispose']);
+    c.show(to, 2, 7, 10, 'own');
+    expect(calls).toEqual(['a.init', 'b.init', 'b.morphFrom a@10 for 7, colours own', 'a.dispose']);
     c.render(11, SILENT);
     expect(calls.slice(-1)).toEqual(['b.render@11']); // only the new scene draws
   });

@@ -5,7 +5,7 @@ import type { Features, RenderSize, Scene } from './types';
 export const COMMON = `#version 300 es
 precision highp float;
 uniform vec2 u_res;
-uniform float u_time, u_seed, u_sub, u_bass, u_swell, u_mids, u_highs, u_kick, u_beat, u_phase, u_bar;
+uniform float u_time, u_seed, u_sub, u_bass, u_swell, u_mids, u_highs, u_kick, u_beat, u_phase, u_bar, u_groove, u_tension, u_tensionTurn, u_drop;
 // Noise takes its seed from the caller, not u_seed: during a morph one program draws two swarms with two seeds.
 float hash(vec2 p, float sd) { return fract(sin(dot(p + sd, vec2(127.1, 311.7))) * 43758.5453); }
 // 0..1, fixed for one showing of a scene; each k is an independent draw. Scenes take their shape from it.
@@ -26,7 +26,7 @@ float fbm(vec2 p, float sd) {
 export const PRELUDE = `${COMMON}out vec4 outColor;
 `;
 
-const UNIFORMS = ['u_res', 'u_time', 'u_seed', 'u_sub', 'u_bass', 'u_swell', 'u_mids', 'u_highs', 'u_kick', 'u_beat', 'u_phase', 'u_bar', 'u_gain'] as const;
+const UNIFORMS = ['u_res', 'u_time', 'u_seed', 'u_sub', 'u_bass', 'u_swell', 'u_mids', 'u_highs', 'u_kick', 'u_beat', 'u_phase', 'u_bar', 'u_groove', 'u_tension', 'u_tensionTurn', 'u_drop', 'u_gain'] as const;
 type Locations = Record<string, WebGLUniformLocation | null>;
 
 export interface SceneOpts { timeScale?: number; gain?: number; deaf?: boolean }
@@ -53,6 +53,10 @@ export function setUniforms(gl: WebGL2RenderingContext, loc: Locations, seed: nu
   gl.uniform1f(loc.u_beat, a?.beat ?? time * timeScale * 2);
   gl.uniform1f(loc.u_phase, a?.beatPhase ?? 0);
   gl.uniform1f(loc.u_bar, a?.bar ?? 0);
+  gl.uniform1f(loc.u_groove, a?.groove ?? 0);
+  gl.uniform1f(loc.u_tension, a?.tension ?? 0);
+  gl.uniform1f(loc.u_tensionTurn, a?.tensionTurn ?? 0);
+  gl.uniform1f(loc.u_drop, Math.min(a?.sinceDrop ?? 99, 99));
   gl.uniform1f(loc.u_gain, opts.gain ?? 1);
 }
 

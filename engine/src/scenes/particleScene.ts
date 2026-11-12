@@ -1,5 +1,7 @@
+import { CONFIG } from '../config';
+import { rng } from '../director/rng';
 import { program } from '../render/gl';
-import { PALETTES, type PaletteName } from './palettes';
+import { nearestPalette, PALETTES, type PaletteName } from './palettes';
 import { COMMON, type SceneOpts, setUniforms, shaderSeed, uniformLocations } from './shaderScene';
 import type { Features, RenderSize, Scene } from './types';
 
@@ -94,13 +96,23 @@ export const SHAPES = [
 ] as const;
 export type ShapeName = (typeof SHAPES)[number];
 
+// Forms that fill the screen: no travel when they groove (it would bare an edge), and no satellites or backdrop.
+// Measured 2026-11-12 with scripts/swarm-check.mjs — at least 40 of the screen's 8 × 6 tiles lit in every shot —
+// plus pearl and sea, which line the whole screen round a dark middle or below a high horizon.
+export const FILLS_SCREEN: readonly ShapeName[] = [
+  'chladni', 'lasers', 'twist', 'tunnel', 'rain', 'rings', 'ripples', 'shards', 'spiro', 'cells', 'coral', 'contour',
+  'grain', 'stars', 'rose', 'supernova', 'sun', 'bloom', 'liquid', 'plasma', 'vortex', 'terrain', 'pearl', 'sea',
+];
+export const FILLS_GLSL = `bool fills(int s) { return ${FILLS_SCREEN.map((n) => `s == ${SHAPES.indexOf(n)}`).join(' || ')}; }\n`;
+
 // pcg and rnd come first so shapes can draw extra randoms. q is the particle's place on a square lattice, for
 // forms drawn in tidy rows of dots; sz scales its point size, for big flakes among fine dust.
 const SHAPE_GLSL = `
 const float PI = 3.14159265;
-float pointCount;                                         // the calling swarm's count, set before each shape()
+float pointCount;                                         // the dot's role's count (lead or satellite), set before each shape()
+int vid;                                                  // the dot's index within its role: shapes use it, never gl_VertexID
 uint pcg(uint v) { uint s = v * 747796405u + 2891336453u; uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u; return (w >> 22u) ^ w; }
-float rnd(uint k, float seed) { return float(pcg(uint(gl_VertexID) * 32u + k + uint(seed * 1000.0) * 65536u)) / 4294967296.0; }
+float rnd(uint k, float seed) { return float(pcg(uint(vid) * 32u + k + uint(seed * 1000.0) * 65536u)) / 4294967296.0; }
 // seeded() from COMMON, for a seed of the caller's choosing: a morph draws two swarms with two seeds.
 float seededBy(float seed, float k) { return fract(sin(seed * 0.731 + k * 12.9898) * 43758.5453); }
 mat2 rot2(float a) { return mat2(cos(a), -sin(a), sin(a), cos(a)); }
@@ -123,7 +135,7 @@ float contourHeight(vec2 p, float t, float seed) {
 }
 // The dot's k-th hop through an iterated function system, for the fractals drawn by hopping: fixed per dot and
 // seed, so each dot keeps its place on the fractal while the maps move.
-float hop(float seed, int k) { return float(pcg(pcg(uint(gl_VertexID) + uint(seed * 1000.0) * 65536u) + uint(k))) / 4294967296.0; }
+float hop(float seed, int k) { return float(pcg(pcg(uint(vid) + uint(seed * 1000.0) * 65536u) + uint(k))) / 4294967296.0; }
 // Point n of N on the golden angle down a cone of radius 1 and height h, apex up, denser near the apex (u: 0 apex .. 1 rim);
 // axis is the way a floret there points, between the cone's normal and straight up.
 vec3 goldenCone(float n, float N, float h, out vec3 axis, out float u) {
@@ -255,7 +267,7 @@ vec3 shape(int s, vec3 r, vec2 q, float t, float seed, inout float sz, inout flo
     return vec3(w.x * cos(flap), w.y - 0.1, abs(w.x) * sin(flap));
   }
   if (s == 13) {                                          // fractal tree: each particle follows its own path of left/right turns
-    uint bits = pcg(uint(gl_VertexID) * 7u + 101u);
+    uint bits = pcg(uint(vid) * 7u + 101u);
     int lv = int(pow(r.z, 0.7) * 10.0);                   // more particles in the finer branches
     vec3 pos = vec3(0.0, -1.0, 0.0), dir = vec3(0.0, 1.0, 0.0);
     float len = 0.5;
@@ -536,8 +548,8 @@ vec3 shape(int s, vec3 r, vec2 q, float t, float seed, inout float sz, inout flo
     return vec3(g + grad / (slope / 18.0) * pull, 0.0);
   }
   if (s == 43) {                                          // sunflower: one head, Vogel's spiral; seeds swell outward and in slow waves from the centre
-    float i = float(gl_VertexID);
-    float ang = float(uint(gl_VertexID) * 2654435769u) / 4294967296.0 * 2.0 * PI + t * 0.02; // golden angle, in exact integer turns
+    float i = float(vid);
+    float ang = float(uint(vid) * 2654435769u) / 4294967296.0 * 2.0 * PI + t * 0.02; // golden angle, in exact integer turns
     float rad = 1.15 * sqrt((i + 0.5) / pointCount);
     vec2 p = rad * vec2(cos(ang), sin(ang));
     float wave = 0.5 + 0.5 * sin(rad * 14.0 - t * 0.9 + 1.5 * fbm(p * 2.0 + t * 0.05, seed));
@@ -548,7 +560,7 @@ vec3 shape(int s, vec3 r, vec2 q, float t, float seed, inout float sz, inout flo
     return vec3(p, -0.05 * wave);
   }
   if (s == 44) {                                          // terrain: 16 × 10 bars, each 3 × 3 dots thick, on a floor seen from above; dots above a bar's height drop to the floor as dust
-    float id = float(gl_VertexID), cid = mod(id, 160.0), k = mod(floor(id / 160.0), 9.0), lvl = floor(id / 1440.0);
+    float id = float(vid), cid = mod(id, 160.0), k = mod(floor(id / 160.0), 9.0), lvl = floor(id / 1440.0);
     vec2 cell = vec2(mod(cid, 16.0), floor(cid / 16.0));
     float z = cell.y / 9.0, D = 1.5 + 4.0 * z;              // 0 front row .. 1 back row; D its distance along the floor
     float x = (cell.x / 15.0 * 2.0 - 1.0) * (1.9 + 0.64 * (D - 1.5));   // rows widen with distance, so the field fills the screen
@@ -619,7 +631,7 @@ vec3 shape(int s, vec3 r, vec2 q, float t, float seed, inout float sz, inout flo
     return vec3(p.x, p.y - 0.34, 0.0);
   }
   if (s == 49) {                                          // romanesco: three levels of the same cone — 55 florets of 21 florets of dots, all on the golden angle
-    float per = floor(pointCount / 55.0), per2 = floor(per / 21.0), id = float(gl_VertexID);
+    float per = floor(pointCount / 55.0), per2 = floor(per / 21.0), id = float(vid);
     float n = min(floor(id / per), 54.0), m = min(floor(mod(id, per) / per2), 20.0), j = mod(mod(id, per), per2);
     float h = 1.6, u1, u2, u3;
     vec3 ax1, ax2, ax3;
@@ -631,7 +643,7 @@ vec3 shape(int s, vec3 r, vec2 q, float t, float seed, inout float sz, inout flo
     return (p - vec3(0.0, 0.85, 0.0)) * 0.8;
   }
   if (s == 50) {                                          // pinecone: 144 diamond scales on the golden angle round an egg, lifting open and shutting
-    float per = floor(pointCount / 144.0), id = float(gl_VertexID);
+    float per = floor(pointCount / 144.0), id = float(vid);
     float n = min(floor(id / per), 143.0), v = (n + 0.5) / 144.0;
     float ang = n * 2.39996323, R = pineRadius(v), slope = (pineRadius(v + 0.01) - pineRadius(v - 0.01)) / 0.04;
     vec3 N = normalize(vec3(cos(ang), -slope, sin(ang))), T1 = vec3(-sin(ang), 0.0, cos(ang)), T2 = cross(N, T1);
@@ -690,7 +702,7 @@ vec3 shape(int s, vec3 r, vec2 q, float t, float seed, inout float sz, inout flo
     return vec3((p - zoom * d * A) / mix(1.0, rd, zoom) * 0.78, 0.0);
   }
   if (s == 52) {                                          // jellyfish: four bells pulsing, each trailing tentacles that take the pulse late, rising
-    float i = mod(float(gl_VertexID), 4.0), sj = 0.4 + 0.2 * seededBy(seed, 70.0 + i);
+    float i = mod(float(vid), 4.0), sj = 0.4 + 0.2 * seededBy(seed, 70.0 + i);
     float per = 2.6 + seededBy(seed, 74.0 + i), w = fract(t / per + seededBy(seed, 78.0 + i));
     float y0 = mod(i * 1.1 + seededBy(seed, 82.0 + i) + 0.05 * t + 0.015 * sin(2.0 * PI * (t / per + seededBy(seed, 78.0 + i))), 4.4) - 2.0;
     vec3 c = vec3((i / 3.0 - 0.5) * 3.0 + 0.4 * (seededBy(seed, 86.0 + i) - 0.5), y0, (seededBy(seed, 90.0 + i) - 0.5) * 0.8);
@@ -784,7 +796,7 @@ vec3 shape(int s, vec3 r, vec2 q, float t, float seed, inout float sz, inout flo
     return p * 0.6 - vec3(0.0, 0.25, 0.0);
   }
   if (s == 55) {                                          // attractor: trail k is the orbit from its own start, 600 dots a quarter step apart behind the head
-    float id = float(gl_VertexID), k = floor(id / 600.0), j = mod(id, 600.0);
+    float id = float(vid), k = floor(id / 600.0), j = mod(id, 600.0);
     float life = 14.0, c = t / life + k / 40.0, age = fract(c) * life;
     vec3 p = vec3(hash(vec2(k, floor(c)), seed), hash(vec2(k + 50.0, floor(c)), seed), hash(vec2(k + 99.0, floor(c)), seed)) * vec3(30.0, 30.0, 30.0) - vec3(15.0, 15.0, -10.0);
     float st = age * 25.0 - j * 0.25;                     // the step this dot sits at
@@ -827,7 +839,7 @@ vec3 shape(int s, vec3 r, vec2 q, float t, float seed, inout float sz, inout flo
     return P.xyz * (1.6 / (3.2 - P.w)) * 0.75;
   }
   if (s == 57) {                                          // rain: 1000 columns of 60 cells through a box; heads step down a cell at a time, cells flicker
-    float id = float(gl_VertexID), col = floor(id / 60.0), j = mod(id, 60.0);
+    float id = float(vid), col = floor(id / 60.0), j = mod(id, 60.0);
     float cx = mod(col, 40.0), cz = floor(col / 40.0);
     float h1 = hash(vec2(col, 1.0), seed), h2 = hash(vec2(col, 2.0), seed);
     vec2 xz = vec2((cx + h2) / 40.0 * 6.0 - 3.0, cz / 25.0 * 3.5 - 1.0);
@@ -927,8 +939,10 @@ vec3 shape(int s, vec3 r, vec2 q, float t, float seed, inout float sz, inout flo
 // and, during a morph, the one it flows out of.
 const VERT = `
 ${SHAPE_GLSL}
-struct Swarm {
+${FILLS_GLSL}struct Swarm {
   float count, hold, morph, spin, kick, breathe, cloud, swirl, size, bright, hueSpeed, seed;
+  float backdrop, perSat, nsat;                           // dots in the backdrop and in each copy, and how many copies: layout()
+  float arrange, path;                                    // index into ARRANGEMENTS and PATHS, picked per showing: choices()
   bool clockBars, stepTurn, facing;
   int nshapes;
   int shapes[${SHAPES.length}];
@@ -936,9 +950,10 @@ struct Swarm {
 };
 uniform Swarm u_to, u_from;
 uniform float u_mix;                                      // progress of a morph out of u_from; 1 = none
+uniform int u_morphStyle;                                 // index into MORPH_STYLES: the incoming showing's pick
 out vec3 v_col;
 out float v_alpha;
-struct Point { vec3 p; vec3 col; float alpha; float size; };
+struct Point { vec3 p; vec3 col; float alpha; float size; float fill; float bg; }; // fill: a form that fills the screen; bg: a backdrop dot
 vec3 rot(vec3 p, float yaw, float pitch) {
   p.xz = mat2(cos(yaw), -sin(yaw), sin(yaw), cos(yaw)) * p.xz;
   p.yz = mat2(cos(pitch), -sin(pitch), sin(pitch), cos(pitch)) * p.yz;
@@ -949,20 +964,53 @@ int shapeAt(Swarm S, float step) {                        // consecutive steps n
   int jump = 1 + int(seededBy(S.seed, 3.0) * float(n - 1));
   return S.shapes[(int(seededBy(S.seed, 2.0) * float(n)) + int(step) * jump) % n];
 }
-// One particle of one swarm, turned to face the camera but not yet projected.
+vec3 palette(Swarm S, float g) { int i = int(g * 4.0); return mix(S.pal[i], S.pal[i + 1], fract(g * 4.0)); }
+float fillAt(Swarm S, float step) { return fills(shapeAt(S, step)) ? 1.0 : 0.0; }
+float total(Swarm S) { return S.backdrop + S.count + S.nsat * S.perSat; }
+// The groove's path for this showing (PATHS), a dip landing on each beat: sway, figure of eight, circle, or a step.
+vec2 travel(float path, float beat) {
+  float B = 2.0 * PI * beat, tx = ${CONFIG.groove.travelX.toFixed(4)}, ty = ${CONFIG.groove.travelY.toFixed(4)};
+  float dip = ${CONFIG.groove.dip.toFixed(4)} * (0.5 + 0.5 * cos(B));
+  if (path < 0.5) return vec2(tx * sin(B / 8.0), ty * sin(B / 16.0 + 1.3) - dip);
+  if (path < 1.5) return vec2(tx * sin(B / 8.0), 1.3 * ty * sin(B / 4.0) - dip);
+  if (path < 2.5) return vec2(0.8 * tx * cos(B / 8.0), 1.8 * ty * sin(B / 8.0) - dip);
+  return vec2(0.7 * tx * sin(B / 8.0), -2.5 * dip);
+}
+// One particle of one swarm, turned to face the camera but not yet projected. Its index says its role (layout()):
+// the backdrop first, then the lead form, then each satellite — so a morph pairs backdrop with backdrop.
 Point swarm(Swarm S) {
   float sd = S.seed;
-  vec3 r = vec3(rnd(0u, sd), rnd(1u, sd), rnd(2u, sd));
-  float side = floor(sqrt(S.count));
-  vec2 q = min((vec2(mod(float(gl_VertexID), side), floor(float(gl_VertexID) / side)) + 0.5) / side, 1.0);
+  float id = float(gl_VertexID);
   float c = (S.clockBars ? u_beat / 4.0 : u_time) / S.hold;
   float step = floor(max(c, 0.0));
   float local = fract(max(c, 0.0));
+  Point o;
+  if (id >= total(S)) { o.p = vec3(0.0); o.col = vec3(0.0); o.alpha = 0.0; o.size = 0.0; o.fill = 0.0; o.bg = 0.0; return o; }
+  if (id < S.backdrop) {
+    // Backdrop (2026-11-12): dim dots drifting slowly in a wide layer behind the form, so the black is never empty.
+    // Not for a form that fills the screen. It ignores the groove and the drop: it is the room, not a dancer.
+    vid = int(id);
+    vec3 r = vec3(rnd(0u, sd), rnd(1u, sd), rnd(2u, sd));
+    o.p = vec3((r.x * 2.0 - 1.0) * 3.3, (r.y * 2.0 - 1.0) * 1.9, 0.8 + 1.4 * r.z)
+        + 0.12 * vec3(sin(u_time * 0.07 + r.y * 20.0), cos(u_time * 0.05 + r.x * 20.0), 0.0);
+    o.col = palette(S, fract(0.5 * r.x + 0.3 * r.y + u_time * S.hueSpeed / 120.0));
+    o.fill = mix(fillAt(S, step), fillAt(S, step + 1.0), S.nshapes < 2 ? 0.0 : smoothstep(1.0 - S.morph, 1.0, local));
+    o.alpha = ${CONFIG.fullness.backdropAlpha.toFixed(3)} * S.bright * (1.0 - o.fill);
+    o.size = S.size;
+    o.bg = 1.0;
+    return o;
+  }
+  float lead = id - S.backdrop, k = -1.0, roleCount = S.count;
+  if (lead >= S.count) { k = floor((lead - S.count) / S.perSat); lead = mod(lead - S.count, S.perSat); roleCount = S.perSat; }
+  vid = int(lead);
+  vec3 r = vec3(rnd(0u, sd), rnd(1u, sd), rnd(2u, sd));
+  float side = floor(sqrt(roleCount));
+  vec2 q = min((vec2(mod(lead, side), floor(lead / side)) + 0.5) / side, 1.0);
   float delay = rnd(3u, sd) * 0.5;                        // particles leave one by one, so the cloud flows
   // A scene of one form never flows into itself: the arc below would swing every point aside each hold.
   float m = S.nshapes < 2 ? 0.0 : smoothstep(0.0, 1.0, clamp((local - (1.0 - S.morph) - delay * S.morph) / (0.5 * S.morph), 0.0, 1.0));
   float sa = 1.0, ha = 0.5 * r.x;                         // size and colour place; a shape may set either
-  pointCount = S.count;
+  pointCount = roleCount;
   vec3 a = shape(shapeAt(S, step), r, q, u_time, sd, sa, ha);
   float sb = sa, hb = ha;
   vec3 b = S.nshapes < 2 ? a : shape(shapeAt(S, step + 1.0), r, q, u_time, sd, sb, hb);
@@ -971,22 +1019,48 @@ Point swarm(Swarm S) {
   p += S.swirl * vec3(sin(p.y * 3.1 + u_time * 0.7), sin(p.z * 2.7 + u_time * 0.9), sin(p.x * 2.9 + u_time * 0.6));
   p += S.cloud * (0.5 - 0.5 * cos(u_time * 0.21)) * dir * rnd(7u, sd);
   vec3 sp = p;                                            // shape space, for colour that sticks to the form
-  // The kick sends a soft ripple out from the centre, reaching the edge ~0.6 s later, rather than the whole
-  // form jumping at once; the bass swells it slowly (u_swell is smoothed), not hit by hit.
-  float w = u_kick - 0.6 * length(sp);
-  float ripple = w > 0.0 ? smoothstep(0.0, 0.12, w) * exp(-w * 2.5) : 0.0;
-  p *= 1.0 + 0.5 * S.kick * ripple * (0.4 + rnd(4u, sd)) + S.breathe * u_swell;
+  // The kick sends a ripple out from the centre rather than the whole form jumping at once; the bass swells it
+  // slowly (u_swell is smoothed), not hit by hit. CONFIG.ripple: a quick rise and travel, so it lands on the kick.
+  float w = u_kick - ${CONFIG.ripple.edgeS.toFixed(3)} * length(sp);
+  float ripple = w > 0.0 ? smoothstep(0.0, ${CONFIG.ripple.riseS.toFixed(3)}, w) * exp(-w * 2.5) : 0.0;
+  p *= 1.0 + ${CONFIG.ripple.gain.toFixed(3)} * S.kick * ripple * (0.4 + rnd(4u, sd)) + S.breathe * u_swell;
   float bars = u_beat / 4.0;
-  float yaw = u_time * S.spin * 2.0 * PI / 60.0 + seededBy(sd, 4.0) * 6.2832
+  float yaw = u_time * S.spin * 2.0 * PI / 60.0 + seededBy(sd, 4.0) * 6.2832 + u_tensionTurn // a build turns it faster
             + (S.stepTurn ? 0.5236 * (floor(bars) + smoothstep(0.0, 0.25, fract(bars))) : 0.0);
-  Point o;
   o.p = S.facing ? p : rot(p, yaw, 0.35 + 0.25 * sin(u_time * 0.05 + seededBy(sd, 5.0) * 6.0));
   o.size = S.size * mix(sa, sb, m);
   float depth = smoothstep(1.6, 3.6, o.p.z + 2.6);        // 0 near, 1 far
   float g = fract(mix(ha, hb, m) + 0.3 * sp.y + 0.25 * length(sp.xz) + 0.2 * depth + u_time * S.hueSpeed / 60.0);
-  int i = int(g * 4.0);
-  o.col = mix(S.pal[i], S.pal[i + 1], fract(g * 4.0));
+  o.col = palette(S, g);
   o.alpha = S.bright * (1.0 + 0.3 * ripple * S.kick);
+  o.fill = mix(fillAt(S, step), S.nshapes < 2 ? fillAt(S, step) : fillAt(S, step + 1.0), m);
+  o.bg = 0.0;
+  // Copies of the form, arranged per showing (ARRANGEMENTS, 2026-11-12), never beside a form that fills the screen;
+  // the groove moves each along this showing's path.
+  float f = o.fill, A = S.arrange, lag = 0.0, mirrorSide = 1.0; // mirrorSide: -1 the lead's side of a mirror, 1 the copy's
+  if (A < 0.5) {
+    if (k >= 0.0) {
+      // Orbit: small copies circling the lead, bobbing a third of a bar apart, shown only while the swarm grooves.
+      float orbit = 2.0 * PI * (k / S.nsat + u_beat / ${CONFIG.fullness.orbitBeats.toFixed(1)});
+      o.p = o.p * ${CONFIG.fullness.satelliteScale.toFixed(3)} + vec3(${CONFIG.fullness.orbitX.toFixed(3)} * cos(orbit), ${CONFIG.fullness.orbitY.toFixed(3)} * sin(orbit) + 0.08 * u_groove * sin(2.0 * PI * (u_beat / 4.0 + k / 3.0)), 0.0);
+      o.size *= 0.8;
+      o.alpha *= smoothstep(0.2, 0.6, u_groove);
+    }
+  } else if (A < 1.5) {
+    // Troupe: three forms in a line, each copy a beat behind the one before, like a dance line.
+    float slot = k < 0.0 ? 0.0 : (k < 0.5 ? -1.0 : 1.0);
+    lag = k + 1.0;
+    o.p = o.p * mix(${CONFIG.fullness.troupeScale.toFixed(3)}, 1.0, f) + vec3(slot * ${CONFIG.fullness.troupeGap.toFixed(3)} * (1.0 - f), 0.0, 0.0);
+  } else {
+    // Mirror: the lead on the left and its reflection on the right, the copy dancing as the lead's mirror image.
+    mirrorSide = k < 0.0 ? -1.0 : 1.0;
+    o.p.x = mix(mirrorSide * (${CONFIG.fullness.mirrorGap.toFixed(3)} - o.p.x * ${CONFIG.fullness.mirrorScale.toFixed(3)}), o.p.x, f);
+    o.p.yz *= mix(${CONFIG.fullness.mirrorScale.toFixed(3)}, 1.0, f);
+  }
+  if (k >= 0.0) o.alpha *= 1.0 - f;
+  vec2 tr = travel(S.path, u_beat - lag) * (A < 0.5 ? 1.0 : 0.5);
+  if (A > 1.5 && mirrorSide > 0.0) tr.x = -tr.x;                // the reflection dances mirror-wise
+  o.p.xy += (1.0 - f) * u_groove * tr;
   return o;
 }
 void main() {
@@ -995,17 +1069,59 @@ void main() {
     Point a = swarm(u_from);
     float id = float(gl_VertexID);
     float m = smoothstep(0.0, 1.0, clamp((u_mix - rnd(8u, u_to.seed) * 0.5) / 0.5, 0.0, 1.0));
-    if (id < u_from.count && id < u_to.count) {
+    if (id < total(u_from) && id < total(u_to)) {
       vec3 dir = normalize(vec3(rnd(4u, u_to.seed), rnd(5u, u_to.seed), rnd(6u, u_to.seed)) - 0.5);
       vec3 p = mix(a.p, o.p, m) + sin(PI * m) * 0.35 * cross(normalize(o.p - a.p + 1e-4), dir);
-      o = Point(p, mix(a.col, o.col, m), mix(a.alpha, o.alpha, m), mix(a.size, o.size, m));
-    } else if (id < u_from.count) {                       // the old swarm had more points: these fade out
+      if (u_morphStyle == 1) {
+        // Pour: dots leave in order across the old form, along one seeded direction, and stream round one shared bend.
+        float ang = seededBy(u_to.seed, 90.0) * 2.0 * PI;
+        vec3 D = vec3(cos(ang), sin(ang), 0.0);
+        float order = clamp(dot(a.p, D) * 0.35 + 0.5, 0.0, 1.0);
+        m = smoothstep(0.0, 1.0, clamp((u_mix - order * 0.55) / 0.45, 0.0, 1.0));
+        vec3 bend = 0.25 * (a.p + o.p) + 0.9 * vec3(-D.y, D.x, 0.0);
+        p = (1.0 - m) * (1.0 - m) * a.p + 2.0 * m * (1.0 - m) * bend + m * m * o.p;
+        p.xy = rot2(0.6 * sin(PI * m)) * p.xy;
+      } else if (u_morphStyle == 2) {
+        // Dissolve and condense: the old form melts into a soft drifting cloud, which gathers into the new one.
+        vec3 cloud = sphereDir(vec2(rnd(9u, u_to.seed), rnd(10u, u_to.seed))) * 1.3 * pow(rnd(11u, u_to.seed), 0.33)
+                   + 0.1 * vec3(sin(u_time * 0.7 + id * 0.01), cos(u_time * 0.6 + id * 0.013), 0.0);
+        float jit = rnd(8u, u_to.seed) * 0.15;
+        float out1 = smoothstep(0.0, 1.0, clamp((u_mix - jit) / 0.4, 0.0, 1.0));
+        float in1 = smoothstep(0.0, 1.0, clamp((u_mix - 0.5 - jit) / 0.35, 0.0, 1.0));
+        p = mix(mix(a.p, cloud, out1), o.p, in1);
+        m = u_mix;
+      } else if (u_morphStyle == 3) {
+        // Grow from inside: the old form collapses to its centre, outer dots first, as the new grows out, inner first.
+        float ra = clamp(length(a.p) / 1.2, 0.0, 1.0), ro = clamp(length(o.p) / 1.2, 0.0, 1.0);
+        float shrink = smoothstep(0.0, 1.0, clamp((u_mix - (1.0 - ra) * 0.3) / 0.3, 0.0, 1.0));
+        float grow = smoothstep(0.0, 1.0, clamp((u_mix - 0.4 - ro * 0.3) / 0.3, 0.0, 1.0));
+        p = a.p * (1.0 - shrink) + o.p * grow;
+        m = grow;
+        a.alpha *= mix(1.0, 0.2, shrink * (1.0 - grow)); // dots bunched at the centre would add up to a white flash
+        o.alpha *= mix(1.0, 0.2, shrink * (1.0 - grow));
+      }
+      o = Point(p, mix(a.col, o.col, m), mix(a.alpha, o.alpha, m), mix(a.size, o.size, m), mix(a.fill, o.fill, m), mix(a.bg, o.bg, m));
+    } else if (id < total(u_from)) {                       // the old swarm had more points: these fade out
       a.alpha *= 1.0 - m;
       o = a;
     } else {
       o.alpha *= m;                                       // the new one has more: these fade in
     }
   }
+  // Roll, build and drop move the whole picture, after any morph, so both swarms of a morph move as one; each form's
+  // travel along its path is set in swarm(), as its copies each take their own.
+  // Groove (design §6): an object form travels in slow beat-locked arcs, dipping on each beat and rolling; a form
+  // that fills the screen only rolls a little and dips by scale, grown slightly so no edge shows.
+  float g = u_groove, f = o.fill, B = 2.0 * PI * u_beat;
+  vec2 still = o.p.xy;                                    // the backdrop keeps its place
+  float roll = ${CONFIG.groove.roll.toFixed(4)} * sin(B / 4.0) * g * mix(1.0, ${CONFIG.groove.fillRoll.toFixed(4)}, f);
+  o.p.xy = rot2(roll) * o.p.xy * (1.0 + f * g * (${CONFIG.groove.fillGrow.toFixed(4)} + ${CONFIG.groove.dip.toFixed(4)} * 0.3 * (0.5 + 0.5 * cos(B))));
+  // A build tightens an object form and brightens any; the drop blows the picture out and lets it fall back.
+  o.p.xy *= 1.0 - ${CONFIG.build.tighten.toFixed(4)} * u_tension * (1.0 - f);
+  o.alpha *= 1.0 + ${CONFIG.build.brighten.toFixed(4)} * u_tension * (1.0 - o.bg);
+  float burst = u_drop < ${CONFIG.burst.outS.toFixed(4)} ? smoothstep(0.0, ${CONFIG.burst.outS.toFixed(4)}, u_drop) : exp(-(u_drop - ${CONFIG.burst.outS.toFixed(4)}) * 3.0 / ${CONFIG.burst.backS.toFixed(4)});
+  o.p.xy *= 1.0 + ${CONFIG.burst.scale.toFixed(4)} * burst;
+  o.p.xy = mix(o.p.xy, still, o.bg);
   float z = o.p.z + 2.6;                                  // camera 2.6 units back
   if (z < 0.15) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; v_alpha = 0.0; return; } // behind the camera
   float aspect = u_res.x / u_res.y;
@@ -1028,7 +1144,33 @@ void main() {
   outColor = vec4(v_col * glow * v_alpha * u_gain, 1.0);
 }`;
 
-interface Showing { sw: Swarm; seed: number; pal: number[] }
+// Picked per showing, so one swarm looks different each time (2026-11-12, the user's ask: "a bit more random"). How
+// its copies stand; which path its dance takes; how it morphs in — all four styles were liked on the curation page.
+export const ARRANGEMENTS = ['orbit', 'troupe', 'mirror'] as const;
+export type Arrangement = (typeof ARRANGEMENTS)[number];
+export const PATHS = ['sway', 'figure of eight', 'circle', 'step'] as const;
+export const MORPH_STYLES = ['own arcs', 'pour as one stream', 'dissolve and condense', 'grow from inside'] as const;
+
+/** A showing's picks, from its seed alone, so a set replays as it played. */
+export function choices(seed: number) {
+  const r = rng(Math.floor(seed * 1000) ^ 0x5eed);
+  return { arrangement: ARRANGEMENTS[Math.floor(r() * ARRANGEMENTS.length)], path: Math.floor(r() * PATHS.length), morph: Math.floor(r() * MORPH_STYLES.length) };
+}
+
+interface Showing { sw: Swarm; seed: number; pal: number[]; arrangement: Arrangement; path: number; morph: number; fills: boolean }
+
+/** A swarm's dots by role, in index order: backdrop, lead form, then each copy (CONFIG.fullness). A mirror copy has
+ *  every dot of the lead, or it would not be a reflection. A swarm whose forms all fill the screen draws neither. */
+export function layout(count: number, arrangement: Arrangement, fills: boolean) {
+  if (fills) return { backdrop: 0, lead: count, satellites: 0, perSatellite: 0, total: count };
+  const { backdrop, satellites: orbiting, satelliteShare, troupeShare, minPerSatellite } = CONFIG.fullness;
+  const [satellites, perSatellite] =
+    arrangement === 'orbit' ? [orbiting, Math.max(minPerSatellite, Math.round(count * satelliteShare))]
+    : arrangement === 'troupe' ? [2, Math.max(minPerSatellite, Math.round(count * troupeShare))]
+    : [1, count];
+  return { backdrop, lead: count, satellites, perSatellite, total: backdrop + count + satellites * perSatellite };
+}
+const layoutOf = (s: Showing) => layout(s.sw.count, s.arrangement, s.fills);
 
 // Swarms set up and not yet disposed, so an incoming swarm can take over the points of the one showing.
 const live = new WeakMap<Scene, Showing>();
@@ -1036,14 +1178,14 @@ const live = new WeakMap<Scene, Showing>();
 // One program for every swarm, built on first use and kept for the context's life: every swarm's source is the
 // same, and building it took ~42 ms — a dropped frame or three on each scene change (2026-10-10). Its uniforms are
 // shared too, so each swarm sets its own on every frame rather than trusting what the last one left.
-interface Shared { prog: WebGLProgram; vao: WebGLVertexArrayObject; loc: ReturnType<typeof uniformLocations>; mix: WebGLUniformLocation | null; at: Map<string, WebGLUniformLocation | null> }
+interface Shared { prog: WebGLProgram; vao: WebGLVertexArrayObject; loc: ReturnType<typeof uniformLocations>; mix: WebGLUniformLocation | null; style: WebGLUniformLocation | null; at: Map<string, WebGLUniformLocation | null> }
 const shared = new WeakMap<WebGL2RenderingContext, Shared>();
 
 function sharedProgram(g: WebGL2RenderingContext): Shared {
   let s = shared.get(g);
   if (!s) {
     const prog = program(g, COMMON + VERT, FRAG);
-    s = { prog, vao: g.createVertexArray(), loc: uniformLocations(g, prog), mix: g.getUniformLocation(prog, 'u_mix'), at: new Map() };
+    s = { prog, vao: g.createVertexArray(), loc: uniformLocations(g, prog), mix: g.getUniformLocation(prog, 'u_mix'), style: g.getUniformLocation(prog, 'u_morphStyle'), at: new Map() };
     shared.set(g, s);
   }
   return s;
@@ -1056,7 +1198,8 @@ function setSwarm(g: WebGL2RenderingContext, sh: Shared, name: 'u_to' | 'u_from'
     return sh.at.get(key)!;
   };
   const { sw } = s;
-  const floats = { count: sw.count, hold: sw.hold, morph: sw.morph, spin: sw.spin, kick: sw.kick, breathe: sw.breathe, cloud: sw.cloud, swirl: sw.swirl, size: sw.size, bright: sw.bright, hueSpeed: sw.hueSpeed, seed: s.seed };
+  const { backdrop, perSatellite, satellites } = layoutOf(s);
+  const floats = { backdrop, perSat: perSatellite, nsat: satellites, arrange: ARRANGEMENTS.indexOf(s.arrangement), path: s.path, count: sw.count, hold: sw.hold, morph: sw.morph, spin: sw.spin, kick: sw.kick, breathe: sw.breathe, cloud: sw.cloud, swirl: sw.swirl, size: sw.size, bright: sw.bright, hueSpeed: sw.hueSpeed, seed: s.seed };
   for (const [k, v] of Object.entries(floats)) g.uniform1f(at(k), v);
   g.uniform1i(at('clockBars'), sw.clock === 'bars' ? 1 : 0);
   g.uniform1i(at('stepTurn'), sw.stepTurn ? 1 : 0);
@@ -1085,12 +1228,17 @@ export function particleScene(meta: { id: string; enabled?: boolean }, sw: Swarm
       const seed = shaderSeed(s);
       // Palette for this showing, closed into a loop so the drifting colour has no seam: stops a b c d a.
       const stops = PALETTES[sw.palettes[seed % sw.palettes.length | 0]];
-      live.set(scene, { sw, seed, pal: [...stops, stops[0]].flat() });
+      live.set(scene, { sw, seed, pal: [...stops, stops[0]].flat(), ...choices(seed), fills: sw.shapes.every((n) => FILLS_SCREEN.includes(n)) });
     },
-    morphFrom(from, time, seconds) {
+    morphFrom(from, time, seconds, colour) {
       const old = live.get(from);
-      if (!old || !sh) return false;
-      morph = { start: time, seconds, count: Math.max(old.sw.count, sw.count), from: old };
+      const showing = live.get(scene);
+      if (!old || !sh || !showing) return false;
+      if (colour === 'near') {
+        const stops = PALETTES[nearestPalette(old.pal, sw.palettes)];
+        showing.pal = [...stops, stops[0]].flat();
+      }
+      morph = { start: time, seconds, count: Math.max(layoutOf(old).total, layoutOf(showing).total), from: old };
       return true;
     },
     render(time: number, f: Features, size: RenderSize) {
@@ -1103,7 +1251,8 @@ export function particleScene(meta: { id: string; enabled?: boolean }, sw: Swarm
       const t = morph ? Math.min(1, Math.max(0, (time - morph.start) / morph.seconds)) : 1;
       if (morph) setSwarm(gl, sh, 'u_from', morph.from);
       gl.uniform1f(sh.mix, t);
-      const count = morph ? morph.count : sw.count;
+      gl.uniform1i(sh.style, showing.morph);
+      const count = morph ? morph.count : layoutOf(showing).total;
       if (t >= 1) morph = null;
       gl.clearColor(0, 0, 0, 1);
       gl.clear(gl.COLOR_BUFFER_BIT);

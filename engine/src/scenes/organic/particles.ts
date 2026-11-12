@@ -1,6 +1,6 @@
 import { particleScene } from '../particleScene';
 
-// Breakdown swarm: breathes with the bass, drifts apart into a loose cloud and re-forms, a new form every 30 s.
+// Breakdown swarm (main and breakdowns since 2026-11-12): breathes with the bass, drifts apart into a loose cloud and re-forms, a new form every 30 s.
 export default particleScene({ id: 'organic-particles' }, {
   count: 30000, shapes: ['galaxy', 'flower', 'shell', 'wave', 'butterfly', 'tree', 'brain', 'field', 'column', 'stars'],
   clock: 'seconds', hold: 30, morph: 0.3,

@@ -365,6 +365,22 @@ The 60 s window let one 30 s misread drop dark for 45 s. The engine's own replay
 
 **Asked for, not built:** moving scenes not followed by still ones (black hole → romanesco at 18:33:31 jarred); knowing when two tracks play at once and when the track changes (19:09: a new, happy track kept the old scene — the clock fell 130 → 120 at the change); mood, so a happy relaxed track turns biological; pearl fringe reaching the centre (built 2026-10-10).
 
+## 11. Five sets since the pools, and flowing swarms (2026-11-12)
+
+**Sessions `logs/20261012-201500/`, `20261017-155643/`, `20261027-200841/`, `20261030-184011/`, `20261106-175230/`** — 49, 46, 71, 77 and 86 minutes, analysed 2026-11-12 from the scene and frame logs (no notes kept during them). The user's verdict afterwards: transitions do not flow, the visuals sometimes do not react, and they should be fuller and dance more.
+
+**Performance — clean.** Render scale 1 throughout, no gaps in `t`; median frame p95 17.5–18.0 ms; 5–35 frames over 20 ms a set. The flash limiter damped ≤ 0.1% of frames — not what dulled the visuals.
+
+**Scene changes came too often.** 36–94 changes a set; 25–40% within 20 s of the one before; 4–20 hard cuts. The bulk: 71 breakdowns over the five sets, each a switch to the breakdown pool and a hard cut back on the drop. All 71 lasted under 30 s in the log — 28 under 8 s — but the flag rises only after 8 bars without a kick (~15 s at 128), as §10 found, so the kick-free stretches ran ~15–43 s: real breakdowns, not EQ moves in a blend. **Changed 2026-11-12** (design §6): a breakdown keeps its scene unless its flag holds 30 s.
+
+**12 Oct lost its audio** for ~11 minutes: 130 stream reopens, 660 s with no tempo, 11 minutes of idle drift. 30 Oct had 8 silences (47 reopens, 4.5 minutes idle). Cause not established — no notes kept.
+
+**Lateness, engine side** (`engine/src/analysis/latency.test.ts`, synthetic 128 BPM kicks through `Analysis` as the wall feeds it): every kick heard, **median 21.4 ms after it lands** (p95 29.8); the beat clock runs **median 21.9 ms behind** the true beat (p5 30.9, p95 17.1). About a frame each — not what reads as late. Hypothesis: the ripple, which rose over 0.12 s and took 0.6 s to reach the edge; now 0.03 s and 0.35 s. BlackHole's buffer, the browser's paint and the projector are not measured.
+
+**Kick detector on long kick-free synthetic stretches.** Feeding synthetic audio with a 20–60 s gap through `Analysis` and the director, the detector found kicks ~10 s into the gap in every variant tried — white noise, off-beat hats with a sharp attack, hats eased in and out with no noise floor. Its 60 s sub-median gate sinks as the gap fills the window, and then anything periodic in the sub band passes, even a high hat's faint leakage. Real sets flagged 71 breakdowns, so live music mostly holds it off, but a false kick in a real breakdown would keep the swarm grooving and stop its build (design §11).
+
+**Headless checks of the new swarms** (`engine/scripts/swarm-check.mjs`, the curation page in headless Chrome on the real GPU, a synthetic kick track): all 79 scenes and swarm forms compile and hold 60 fps — frame p95 ≤ 16.8 ms — with the backdrop and copies, including mirror (every lead dot drawn twice) on the 120 000-dot swarms. rAF caps at 60, so this is 60 fps held, not headroom. Screen tiles lit (of 8 × 6) rose from 29 to 43 on average with orbit; forms sway 12–20% of the screen's width over 8 s at main's groove. **Uncapped** (`--uncapped`: no vsync, no frame cap), the heaviest case — romanesco ↔ fern, mirror into mirror, ~245 000 dots morphing — ran frame p95 10.1 ms, p99 12.2 ms, one 28 ms frame as a scene set up; a plain sphere 5.3 ms. Headroom headless ~30–40% of the 16.7 ms budget; live, rekordbox and the fanless Air's throttling take their share, and FrameWatch's scale-down lowers resolution, not dot count. The shader check caught two compile errors before they shipped (a name used twice, and `half`, a reserved word in GLSL).
+
 ## Starting configuration for V1
 
 From `spike/logs/capture-20261001074825.config.json` and the `analyse.py` defaults (design §5):
