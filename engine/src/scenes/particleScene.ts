@@ -3,7 +3,8 @@ import { rng } from '../director/rng';
 import { program } from '../render/gl';
 import { nearestPalette, PALETTES, type PaletteName } from './palettes';
 import { COMMON, type SceneOpts, setUniforms, shaderSeed, uniformLocations } from './shaderScene';
-import type { Features, RenderSize, Scene } from './types';
+import { BUILD_STYLES, LifeCycle, REST } from './lifeCycle';
+import { MORPH_STYLES, SILENT, type Features, type RenderSize, type Scene } from './types';
 
 // Glowing particle swarms that flow from one 3D shape to the next — the look of particles.casberry.in,
 // written fresh (that site states no licence). Every particle's position is a pure function of its index,
@@ -93,8 +94,17 @@ export const SHAPES = [
   'dome',      // squiggle dome: a hemisphere of worm-like cells under contour rings drifting up it
   'rose',      // rose nebula: petals of gas round a pulsing cluster, a dark dust lane, a halo spreading out
   'ribbon',    // chronos ribbon: dotted rings strung along a bending axis, flowing down it
+  // Physics, each drawn from its real equations (2026-11-13: the user asked for visuals like Veritasium's):
+  'pendulums', // pendulum wave: 15 pendulums falling in and out of step
+  'orbital2p', 'orbital3p', 'orbital3d', 'orbital3dxz', 'orbital4f', // hydrogen orbitals: the electron's probability cloud
+  'slits',     // two-slit interference, and dots landing one by one into its bands
+  'galton',    // Galton board: balls through pegs piling into a bell curve
+  'caustics',  // light through rippled water, crowding into the web on a pool floor
+  'horizon',   // black hole: shadow, photon ring, lensed disc, Doppler beaming, infall that never crosses
+  'plotter',   // squares within squares, order sweeping into disorder and back (the user's reference, 2026-11-13)
 ] as const;
 export type ShapeName = (typeof SHAPES)[number];
+const I = (n: ShapeName) => SHAPES.indexOf(n);
 
 // Forms that fill the screen: no travel when they groove (it would bare an edge), and no satellites or backdrop.
 // Measured 2026-11-12 with scripts/swarm-check.mjs — at least 40 of the screen's 8 × 6 tiles lit in every shot —
@@ -102,6 +112,7 @@ export type ShapeName = (typeof SHAPES)[number];
 export const FILLS_SCREEN: readonly ShapeName[] = [
   'chladni', 'lasers', 'twist', 'tunnel', 'rain', 'rings', 'ripples', 'shards', 'spiro', 'cells', 'coral', 'contour',
   'grain', 'stars', 'rose', 'supernova', 'sun', 'bloom', 'liquid', 'plasma', 'vortex', 'terrain', 'pearl', 'sea',
+  'slits', 'caustics', 'plotter',
 ];
 export const FILLS_GLSL = `bool fills(int s) { return ${FILLS_SCREEN.map((n) => `s == ${SHAPES.indexOf(n)}`).join(' || ')}; }\n`;
 
@@ -922,6 +933,221 @@ vec3 shape(int s, vec3 r, vec2 q, float t, float seed, inout float sz, inout flo
     hu = 0.6 * sp + 0.1 * rad;
     return c + rad * (cos(a2) * N + sin(a2) * Bn);
   }
+  if (s == ${I('pendulums')}) {
+    // Pendulum wave: 15 pendulums, each length set by a real pendulum's law (length ∝ period²) so that in 32 bars they
+    // swing 20, 21 … 34 times — in step at each run's start, then a snake, braids, halves, and in step again. The bobs
+    // swing toward us; the frame leans back so the swing reads as up and down. A trail shows where each bob just was.
+    float N = 15.0, n = floor(r.x * N), K = 20.0;
+    float x = (n / (N - 1.0)) * 2.9 - 1.45, L = 1.5 * pow(K / (K + n), 2.0), top = 1.0;
+    float A = 0.42 + 0.12 * u_swell;
+    vec3 p;
+    hu = n / N;
+    if (r.z < 0.05) { p = vec3(r.y * 3.1 - 1.55, top, 0.0); sz = 0.5; hu = 0.0; }        // the bar they hang from
+    else {
+      float lag = r.z > 0.78 ? (r.z - 0.78) / 0.22 : 0.0;                                   // trail: up to a beat behind
+      float th = A * cos(2.0 * PI * (K + n) * (u_beat - lag) / 128.0);
+      vec3 bob = vec3(x, top - L * cos(th), L * sin(th));
+      if (r.z < 0.3) { p = mix(vec3(x, top, 0.0), bob, r.y); sz = 0.3; }                    // the string
+      else if (r.z < 0.78) { p = bob + sphereDir(vec2(r.y, fract(r.z * 37.0))) * 0.06 * pow(fract(r.z * 91.0), 0.33); sz = 1.0; }
+      else { p = bob + 0.012 * jitter(r.y); sz = 0.9 * (1.0 - lag); }
+    }
+    p.yz = rot2(0.75) * p.yz;
+    p.y -= 0.2;
+    p.xz = rot2(0.3 * sin(t * 0.05)) * p.xz;
+    return p;
+  }
+  if (s >= ${I('orbital2p')} && s <= ${I('orbital4f')}) {
+    // Hydrogen orbitals 2p, 3p, 3d z², 3d xz, 4f z³: each dot sits where the electron is likely to be found, |ψ|² — by
+    // rejection, a try at a radius drawn evenly kept with chance ψ²r² over its peak. The lobes' signs, as textbooks
+    // colour them, set the colour; the cloud shimmers.
+    int k = s - ${I('orbital2p')};
+    float R = k == 0 ? 12.0 : k == 1 ? 25.0 : k == 4 ? 34.0 : 22.0;
+    float W = k == 0 ? 4.9 : k == 1 ? 263.0 : k == 2 ? 5530.0 : k == 3 ? 346.0 : 6.05e6;
+    vec3 p = vec3(0.0);
+    float psi = 0.0;
+    sz = 0.0;
+    for (int i = 0; i < 32; i++) {
+      float rr = R * hop(seed, 40 + i * 4);
+      vec3 x = sphereDir(vec2(hop(seed, 41 + i * 4), hop(seed, 42 + i * 4))) * rr;
+      float c = x.y / max(rr, 1e-4);
+      float v = k == 0 ? rr * exp(-rr / 2.0) * c : k == 1 ? rr * (6.0 - rr) * exp(-rr / 3.0) * c
+              : k == 2 ? rr * rr * exp(-rr / 3.0) * (3.0 * c * c - 1.0) : k == 3 ? exp(-rr / 3.0) * x.x * x.z
+              : rr * rr * rr * exp(-rr / 4.0) * (5.0 * c * c * c - 3.0 * c);
+      if (hop(seed, 43 + i * 4) * W < v * v * rr * rr) { p = x / R * 2.1; psi = v; sz = 1.0; break; }
+    }
+    hu = (psi > 0.0 ? 0.1 : 0.6) + 0.15 * length(p);
+    sz *= 0.75 + 0.25 * sin(t * 2.0 + r.x * 40.0);
+    return p;
+  }
+  if (s == ${I('slits')}) {
+    // Two-slit interference: a wave from the left meets a wall with two slits; a circular wave spreads from each, and
+    // where they meet they add or cancel in bands — the dark rays are where they cancel. At the right single dots land
+    // on a screen one by one, each where the two waves make it likely, and build up the same bands over 16 bars.
+    float wall = -0.95, sep = 0.32, wl = 0.16, w = 2.0 * PI * u_beat;                    // one wave a beat
+    float kw = 2.0 * PI / wl, G = floor(pointCount * 0.74), Wd = floor(pointCount * 0.05), id = float(vid);
+    vec2 s1 = vec2(wall, sep / 2.0), s2 = vec2(wall, -sep / 2.0);
+    if (id < G) {
+      float cols = floor(sqrt(G * 1.8)), rows = floor(G / cols);
+      vec2 c = vec2(mod(id, cols), floor(id / cols));
+      vec2 p = (vec2(c.x / (cols - 1.0), c.y / (rows - 1.0)) * 2.0 - 1.0) * vec2(2.15, 1.22);
+      float h = p.x < wall ? cos(kw * p.x - w)
+              : (cos(kw * length(p - s1) - w) / sqrt(1.0 + 4.0 * length(p - s1)) + cos(kw * length(p - s2) - w) / sqrt(1.0 + 4.0 * length(p - s2))) * 1.1;
+      sz = c.y >= rows || p.x > 1.72 ? 0.0 : 0.15 + 1.3 * max(h, 0.0);
+      hu = 0.45 + 0.25 * h;
+      return vec3(p, 0.0);
+    }
+    if (id < G + Wd) {                                                                    // the wall, open at the slits
+      float y = r.y * 2.44 - 1.22;
+      sz = min(abs(y - s1.y), abs(y - s2.y)) < 0.03 ? 0.0 : 0.6;
+      hu = 0.9;
+      return vec3(wall + 0.012 * (r.x - 0.5), y, 0.0);
+    }
+    float y = 0.0, L = 1.9 - wall;
+    sz = 0.0;
+    for (int i = 0; i < 16; i++) {
+      float yy = hop(seed, 70 + i * 2) * 2.3 - 1.15;
+      float r1 = length(vec2(L, yy - s1.y)), r2 = length(vec2(L, yy - s2.y));
+      float I0 = 1.0 / r1 + 1.0 / r2 + 2.0 * cos(kw * (r1 - r2)) / sqrt(r1 * r2);
+      if (hop(seed, 71 + i * 2) * 1.45 < I0) { y = yy; sz = 1.0; break; }
+    }
+    float landed = fract(u_beat / 64.0) - hop(seed, 99);                                  // its moment in this 16 bars
+    sz *= landed < 0.0 ? 0.0 : 0.8 + 3.0 * exp(-landed * 128.0);                        // a flash as it lands
+    hu = 0.1;
+    return vec3(1.9 + 0.1 * (hop(seed, 98) - 0.5), y, 0.0);
+  }
+  if (s == ${I('galton')}) {
+    // Galton board: balls fall through 12 rows of pegs, going left or right at each like a coin toss, and pile up in 13
+    // bins as a bell curve — the binomial distribution. Over 32 bars they pour from the hopper for 22, the bins empty
+    // from bar 27, and the hopper fills again. A ball's height in its bin follows its turn, so the curve grows evenly.
+    float dx = 0.13, dy = 0.085, top = 0.8, binTop = top - 12.0 * dy - 0.04, bottom = -1.05;
+    float c = mod(u_beat, 128.0);
+    if (r.z < 0.08) {                                                                     // pegs
+      float m = floor(r.x * 78.0), j = floor((sqrt(8.0 * m + 1.0) - 1.0) / 2.0), i = m - j * (j + 1.0) / 2.0;
+      sz = 0.9; hu = 0.85;
+      return vec3((i - j / 2.0) * dx, top - j * dy, 0.0) + 0.012 * vec3(sphereDir(r.yz).xy, 0.0);
+    }
+    if (r.z < 0.16) {                                                                     // bin walls and floor
+      sz = 0.45; hu = 0.85;
+      if (r.z < 0.145) return vec3((floor(r.x * 14.0) - 6.5) * dx, mix(binTop, bottom, r.y), 0.0);
+      return vec3((r.x - 0.5) * 13.0 * dx, bottom, 0.0);
+    }
+    float tau = hop(seed, 60), launch = tau * 88.0, since = c - launch;
+    float rights[13];
+    rights[0] = 0.0;
+    for (int i = 0; i < 12; i++) rights[i + 1] = rights[i] + step(0.5, hop(seed, 61 + i));
+    float b = rights[12];
+    vec3 p;
+    sz = 0.9; hu = 0.5;
+    if (since < 0.0) {                                                                    // waiting in the hopper
+      float left = clamp((tau - c / 88.0) / max(1.0 - c / 88.0, 1e-3), 0.0, 1.0);
+      p = vec3((hop(seed, 80) - 0.5) * (0.06 + 0.5 * left), top + 0.08 + 0.4 * left, 0.0);
+      sz *= smoothstep(0.0, 2.0, c);
+    } else if (since < 12.0 * 0.35) {                                                     // falling through the pegs
+      float jf = since / 0.35, j = floor(jf), f = fract(jf);
+      int ji = int(j);
+      float x0 = (rights[ji] - j / 2.0) * dx, x1 = (rights[ji + 1] - (j + 1.0) / 2.0) * dx;
+      p = vec3(mix(x0, x1, f), top - j * dy - dy * f * f + 0.03 * sin(PI * f) + 0.02, 0.0);
+    } else {                                                                              // in its bin
+      float comb = 1.0;
+      for (int i = 0; i < 12; i++) { if (float(i) >= b) break; comb *= (12.0 - float(i)) / (float(i) + 1.0); }
+      float rest = bottom + 0.015 + 0.8 * tau * comb / 924.0;
+      float y = max(rest, binTop - 2.0 * (since - 4.2) * (since - 4.2) * 0.05);
+      if (c > 108.0) y -= 0.02 * (c - 108.0) * (c - 108.0);
+      sz *= step(-1.3, y);
+      p = vec3((b - 6.0) * dx + (hop(seed, 81) - 0.5) * dx * 0.75, y, 0.0);
+      hu = b / 12.0;
+    }
+    return p;
+  }
+  if (s == ${I('caustics')}) {
+    // Light on a pool floor: each dot is a ray of light coming down through the rippled surface, bent by its slope —
+    // Snell's law, for small slopes a shift along the gradient. Where rays bend together they crowd into the bright web
+    // of a pool's floor: the caustics are where the dots bunch, not drawn on.
+    // Gentle, fine waves from five directions: each bends light just enough to focus a little before the floor
+    // (amplitude × wavenumber² × depth near 1), so the rays cross into a web rather than folding into sheets.
+    // Each ray starts at a random spot in its lattice cell, so the lattice's rows don't read as lines.
+    vec2 g = screenGrid(q) * 1.1 + (r.xy - 0.5) * vec2(4.73, 2.68) / sqrt(pointCount);
+    vec2 grad = vec2(0.0);
+    for (int i = 0; i < 5; i++) {
+      float fi = float(i), ang = seededBy(seed, 200.0 + fi) * 2.0 * PI, kk = 14.0 + 8.0 * seededBy(seed, 210.0 + fi);
+      vec2 K = kk * vec2(cos(ang), sin(ang));
+      grad += 0.0008 * (1.0 + 0.3 * u_swell) * K * cos(dot(K, g) - (0.5 + 0.2 * fi) * t + seededBy(seed, 220.0 + fi) * 6.28);
+    }
+    sz = 0.7;
+    hu = 0.35 + 6.0 * length(grad);
+    return vec3(g + 4.5 * grad, 0.0);
+  }
+  if (s == ${I('horizon')}) {
+    // A black hole as general relativity draws it: the shadow, edged by the photon ring where light circles the hole; a
+    // thin disc turning by Kepler's law (the inner edge fastest), its far side lifted over the shadow and a sliver
+    // under it by lensing (the point-lens equation), the side coming toward us brighter and bluer (Doppler beaming),
+    // the inner edge dimmed and reddened by gravity; matter falling in slows, reddens and fades at the horizon without
+    // ever being seen to cross; stars behind crowd round the Einstein ring.
+    float rs = 0.16, bc = 2.598 * rs, HZ = 1.2;                          // the hole sits HZ behind the form's centre
+    if (r.z < 0.05) {                                                                     // photon ring
+      float a = 2.0 * PI * r.x, b = bc * (1.02 + 0.02 * r.y);
+      sz = 1.3 * (0.8 + 0.2 * sin(t * 3.0 + r.x * 60.0)); hu = 0.2;
+      return vec3(b * cos(a), b * sin(a), HZ);
+    }
+    vec3 P;
+    float bright = 1.0;
+    if (r.z < 0.13) {                                                                     // stars behind
+      P = vec3(mod((r.x * 2.0 - 1.0) * 5.0 + 0.03 * t + 5.0, 10.0) - 5.0, (r.y * 2.0 - 1.0) * 3.0, 4.0);
+      sz = fract(r.z * 997.0) < 0.1 ? 1.6 : 0.5; hu = 0.6;
+    } else if (r.z < 0.25) {                                                              // matter falling in
+      float st = floor(r.x * 6.0), fall = fract(t / 45.0 + st / 6.0 + 0.03 * r.y);
+      float rr = rs * 1.03 + (1.5 - rs) * exp(-fall * 6.0);                               // nears the horizon, never crosses
+      float ang = st * 1.05 + 4.0 * (1.0 - exp(-fall * 6.0));
+      P = vec3(rr * cos(ang), 0.04 * (r.y - 0.5), rr * sin(ang));
+      bright = 1.0 - rs / rr;
+      sz = 1.0; hu = 0.02 + 0.1 * bright;
+    } else {                                                                              // the disc
+      float rr = mix(3.0 * rs, 1.5, pow(r.x, 1.6));
+      float ang = 2.0 * PI * r.y + 0.9 * pow(rr / (3.0 * rs), -1.5) * t;
+      P = vec3(rr * cos(ang), 0.015 * (fract(r.z * 41.0) - 0.5), rr * sin(ang));
+      float toward = -cos(ang) * sqrt(rs / (2.0 * rr)) * 1.3;                           // speed toward us, over c
+      bright = pow(1.0 / (1.0 - toward), 3.0) * sqrt(1.0 - rs / rr) * 0.6;
+      sz = 0.9; hu = 0.12 + 0.25 * toward + 0.25 * (1.0 - rr / 1.5);
+    }
+    P.yz = rot2(0.12) * P.yz;                                                             // the disc seen nearly edge-on
+    if (P.z > 0.0) {
+      float D = P.z + 2.6 + HZ, RE2 = 2.0 * rs * P.z * (2.6 + HZ) / D;               // Einstein radius², in the hole's plane
+      vec2 sp = P.xy * (2.6 + HZ) / D;
+      float b = max(length(sp), 1e-4);
+      bool second = fract(r.z * 53.0) > 0.85;
+      float bp = (b + sqrt(b * b + 4.0 * RE2)) / 2.0;
+      bright *= 1.5;                                                                      // lensing magnifies
+      if (second) { bp = bc * (1.04 + 0.12 * (sqrt(b * b + 4.0 * RE2) - b) / (2.0 * sqrt(RE2))); bright *= 0.5; }
+      P = vec3(sp / b * bp * (second ? -1.0 : 1.0), 0.0);
+    }
+    P.z += HZ;
+    sz *= bright;
+    return P;
+  }
+  if (s == ${I('plotter')}) {
+    // Squares within squares on a grid, after 1960s–70s plotter art: order on the left, disorder on the right, and the
+    // edge between them sweeping across and back over 32 bars — each square turned, shifted, grown and its corners
+    // pulled by its own amounts, scaled by how disordered its cell is. A build scrambles them all.
+    float cols = 7.0, rows = 4.0, rings = 6.0;
+    float sq = floor(r.z * cols * rows * rings), cell = floor(sq / rings), ring = mod(sq, rings);
+    vec2 cc = vec2(mod(cell, cols), floor(cell / cols));
+    vec2 centre = (vec2((cc.x + 0.5) / cols, (cc.y + 0.5) / rows) * 2.0 - 1.0) * vec2(1.9, 1.05);
+    float front = mix(-2.6, 2.6, abs(fract(u_beat / 128.0) * 2.0 - 1.0));
+    float d = clamp((centre.x - front) / 1.8 + 0.5, 0.0, 1.0);
+    d = max(d * d, u_tension);
+    float k = sq * 17.0, e = floor(r.x * 4.0), f = fract(r.x * 4.0);
+    float hs = 0.2 * (ring + 1.0) / rings * (1.0 + d * (seededBy(seed, k + 3.0) - 0.5) * 1.2);
+    vec2 c0 = vec2(e == 0.0 || e == 3.0 ? -1.0 : 1.0, e < 1.5 ? -1.0 : 1.0) * hs;
+    vec2 c1 = vec2(e == 2.0 || e == 3.0 ? -1.0 : 1.0, e == 0.0 || e == 3.0 ? -1.0 : 1.0) * hs;
+    c0 += d * (vec2(seededBy(seed, k + 4.0 + e), seededBy(seed, k + 8.0 + e)) - 0.5) * 0.35;
+    float e1 = mod(e + 1.0, 4.0);
+    c1 += d * (vec2(seededBy(seed, k + 4.0 + e1), seededBy(seed, k + 8.0 + e1)) - 0.5) * 0.35;
+    vec2 p = rot2(d * (seededBy(seed, k) - 0.5) * 1.6) * mix(c0, c1, f);
+    p += centre + d * (vec2(seededBy(seed, k + 1.0), seededBy(seed, k + 2.0)) - 0.5) * 0.45;
+    sz = 0.5;
+    hu = 0.1 + 0.6 * d;
+    return vec3(p, 0.0);
+  }
   if (s >= 58 && s <= 60) {                               // octahedron, dodecahedron, icosahedron: dots sent out from the centre to the surface
     float edge;
     vec3 d = sphereDir(r.xy);                             // random, not the lattice: its rows bunch at the poles
@@ -943,6 +1169,7 @@ ${FILLS_GLSL}struct Swarm {
   float count, hold, morph, spin, kick, breathe, cloud, swirl, size, bright, hueSpeed, seed;
   float backdrop, perSat, nsat;                           // dots in the backdrop and in each copy, and how many copies: layout()
   float arrange, path;                                    // index into ARRANGEMENTS and PATHS, picked per showing: choices()
+  float life, lifeStyle, rest, copies, grow;              // the life cycle (lifeCycle.ts): how much is built, how, what is left, copies
   bool clockBars, stepTurn, facing;
   int nshapes;
   int shapes[${SHAPES.length}];
@@ -950,7 +1177,7 @@ ${FILLS_GLSL}struct Swarm {
 };
 uniform Swarm u_to, u_from;
 uniform float u_mix;                                      // progress of a morph out of u_from; 1 = none
-uniform int u_morphStyle;                                 // index into MORPH_STYLES: the incoming showing's pick
+uniform int u_morphStyle;                                 // index into MORPH_STYLES, or ${MORPH_STYLES.length}: through nothing
 out vec3 v_col;
 out float v_alpha;
 struct Point { vec3 p; vec3 col; float alpha; float size; float fill; float bg; }; // fill: a form that fills the screen; bg: a backdrop dot
@@ -975,6 +1202,19 @@ vec2 travel(float path, float beat) {
   if (path < 1.5) return vec2(tx * sin(B / 8.0), 1.3 * ty * sin(B / 4.0) - dip);
   if (path < 2.5) return vec2(0.8 * tx * cos(B / 8.0), 1.8 * ty * sin(B / 8.0) - dip);
   return vec2(0.7 * tx * sin(B / 8.0), -2.5 * dip);
+}
+// Where a dot rests once its form has come apart (lifeCycle.ts REST), keyed on the dot's own index, not its role, so a
+// form that comes back as copies takes its dots from where they lie.
+vec3 dustAt(float id) {
+  uint u = uint(id) * 3u + 1013u;
+  vec3 r = vec3(float(pcg(u)), float(pcg(u + 1u)), float(pcg(u + 2u))) / 4294967296.0;
+  return vec3((r.x * 2.0 - 1.0) * 2.1, (r.y * 2.0 - 1.0) * 1.2, (r.z * 2.0 - 1.0) * 0.6)
+       + 0.15 * vec3(sin(u_time * 0.13 + r.y * 30.0), cos(u_time * 0.11 + r.x * 30.0), 0.0);
+}
+vec3 pointAt(float id) {
+  uint u = uint(id) * 3u + 2029u;
+  vec2 r = vec2(float(pcg(u)), float(pcg(u + 1u))) / 4294967296.0;
+  return sphereDir(r) * ${CONFIG.life.pointRadius.toFixed(3)} * (1.0 + 0.5 * u_swell) * pow(float(pcg(u + 2u)) / 4294967296.0, 0.33);
 }
 // One particle of one swarm, turned to face the camera but not yet projected. Its index says its role (layout()):
 // the backdrop first, then the lead form, then each satellite — so a morph pairs backdrop with backdrop.
@@ -1001,7 +1241,14 @@ Point swarm(Swarm S) {
     return o;
   }
   float lead = id - S.backdrop, k = -1.0, roleCount = S.count;
-  if (lead >= S.count) { k = floor((lead - S.count) / S.perSat); lead = mod(lead - S.count, S.perSat); roleCount = S.perSat; }
+  if (S.copies > 0.5) {
+    // Copies over the screen (lifeCycle.ts): every dot but the backdrop's, shared evenly among them.
+    float per = floor((total(S) - S.backdrop) / S.copies);
+    k = floor(lead / per);
+    if (k >= S.copies) { o.p = vec3(0.0); o.col = vec3(0.0); o.alpha = 0.0; o.size = 0.0; o.fill = 0.0; o.bg = 0.0; return o; }
+    lead -= k * per;
+    roleCount = per;
+  } else if (lead >= S.count) { k = floor((lead - S.count) / S.perSat); lead = mod(lead - S.count, S.perSat); roleCount = S.perSat; }
   vid = int(lead);
   vec3 r = vec3(rnd(0u, sd), rnd(1u, sd), rnd(2u, sd));
   float side = floor(sqrt(roleCount));
@@ -1018,6 +1265,15 @@ Point swarm(Swarm S) {
   vec3 p = mix(a, b, m) + sin(PI * m) * 0.35 * cross(normalize(b - a + 1e-4), dir); // arc, not a straight slide
   p += S.swirl * vec3(sin(p.y * 3.1 + u_time * 0.7), sin(p.z * 2.7 + u_time * 0.9), sin(p.x * 2.9 + u_time * 0.6));
   p += S.cloud * (0.5 - 0.5 * cos(u_time * 0.21)) * dir * rnd(7u, sd);
+  // Life (lifeCycle.ts): each dot has its own moment to appear, set by the build style — along the form's line (r.x
+  // runs along most forms), outward from the centre, at random out of dust, or bottom first, falling from above.
+  // lp: 0 not yet there .. 1 in place. Coming apart is the same, reversed.
+  float st = S.lifeStyle;
+  float order = st < 0.5 ? r.x : st < 1.5 ? clamp(length(p) / 1.3, 0.0, 1.0) : st < 2.5 ? rnd(12u, sd) : clamp((p.y + 1.3) / 2.6, 0.0, 1.0);
+  float lp = clamp((S.life - order * (1.0 - ${CONFIG.life.soft.toFixed(3)})) / ${CONFIG.life.soft.toFixed(3)}, 0.0, 1.0);
+  float le = lp * lp * (3.0 - 2.0 * lp);
+  if (st > 0.5 && st < 1.5) p *= le;
+  if (st > 2.5) p.y += 2.5 * (1.0 - le) * (1.0 - le);
   vec3 sp = p;                                            // shape space, for colour that sticks to the form
   // The kick sends a ripple out from the centre rather than the whole form jumping at once; the bass swells it
   // slowly (u_swell is smoothed), not hit by hit. CONFIG.ripple: a quick rise and travel, so it lands on the kick.
@@ -1027,7 +1283,7 @@ Point swarm(Swarm S) {
   float bars = u_beat / 4.0;
   float yaw = u_time * S.spin * 2.0 * PI / 60.0 + seededBy(sd, 4.0) * 6.2832 + u_tensionTurn // a build turns it faster
             + (S.stepTurn ? 0.5236 * (floor(bars) + smoothstep(0.0, 0.25, fract(bars))) : 0.0);
-  o.p = S.facing ? p : rot(p, yaw, 0.35 + 0.25 * sin(u_time * 0.05 + seededBy(sd, 5.0) * 6.0));
+  o.p = S.facing ? p : rot(p, yaw + (S.copies > 1.5 ? k * 1.1 : 0.0), 0.35 + 0.25 * sin(u_time * 0.05 + seededBy(sd, 5.0) * 6.0));
   o.size = S.size * mix(sa, sb, m);
   float depth = smoothstep(1.6, 3.6, o.p.z + 2.6);        // 0 near, 1 far
   float g = fract(mix(ha, hb, m) + 0.3 * sp.y + 0.25 * length(sp.xz) + 0.2 * depth + u_time * S.hueSpeed / 60.0);
@@ -1038,7 +1294,15 @@ Point swarm(Swarm S) {
   // Copies of the form, arranged per showing (ARRANGEMENTS, 2026-11-12), never beside a form that fills the screen;
   // the groove moves each along this showing's path.
   float f = o.fill, A = S.arrange, lag = 0.0, mirrorSide = 1.0; // mirrorSide: -1 the lead's side of a mirror, 1 the copy's
-  if (A < 0.5) {
+  if (S.copies > 0.5) {
+    // Copies on a grid over the screen, each a beat behind the one before and turned its own way; one alone is larger.
+    float N = S.copies, cols = N < 1.5 ? 1.0 : N < 2.5 ? 2.0 : N < 3.5 ? 3.0 : N < 4.5 ? 2.0 : 3.0, rows = ceil(N / cols);
+    vec2 cell = vec2(mod(k, cols), floor(k / cols));
+    vec2 at = vec2(((cell.x + 0.5) / cols * 2.0 - 1.0) * 1.7, -((cell.y + 0.5) / rows * 2.0 - 1.0) * 0.9);
+    float sc = N < 1.5 ? S.grow : 0.75 * min(1.7 / cols, 0.9 / rows);
+    o.p = o.p * mix(sc, 1.0, f) + vec3(at * (1.0 - f), 0.0);
+    lag = N < 1.5 ? 0.0 : k;
+  } else if (A < 0.5) {
     if (k >= 0.0) {
       // Orbit: small copies circling the lead, bobbing a third of a bar apart, shown only while the swarm grooves.
       float orbit = 2.0 * PI * (k / S.nsat + u_beat / ${CONFIG.fullness.orbitBeats.toFixed(1)});
@@ -1057,15 +1321,32 @@ Point swarm(Swarm S) {
     o.p.x = mix(mirrorSide * (${CONFIG.fullness.mirrorGap.toFixed(3)} - o.p.x * ${CONFIG.fullness.mirrorScale.toFixed(3)}), o.p.x, f);
     o.p.yz *= mix(${CONFIG.fullness.mirrorScale.toFixed(3)}, 1.0, f);
   }
-  if (k >= 0.0) o.alpha *= 1.0 - f;
-  vec2 tr = travel(S.path, u_beat - lag) * (A < 0.5 ? 1.0 : 0.5);
-  if (A > 1.5 && mirrorSide > 0.0) tr.x = -tr.x;                // the reflection dances mirror-wise
+  if (k >= 0.0 && S.copies < 0.5) o.alpha *= 1.0 - f;
+  vec2 tr = travel(S.path, u_beat - lag) * (S.copies > 1.5 ? 0.4 : A < 0.5 || S.copies > 0.5 ? 1.0 : 0.5);
+  if (A > 1.5 && mirrorSide > 0.0 && S.copies < 0.5) tr.x = -tr.x; // the reflection dances mirror-wise
   o.p.xy += (1.0 - f) * u_groove * tr;
+  // Life, after the arrangement: fade and shrink by lp, a bright edge where a line is drawing itself; dots gathering from
+  // dust fly in from it, and the dots left when the form has come apart (REST) rest as dust or one glowing point.
+  o.alpha *= st < 0.5 ? smoothstep(0.0, 0.5, lp) * (1.0 + 1.5 * sin(PI * lp)) : st < 1.5 ? smoothstep(0.0, 0.4, lp)
+           : st < 2.5 ? smoothstep(0.0, 0.6, lp) : smoothstep(0.0, 0.25, lp);
+  o.size *= mix(0.4, 1.0, lp);
+  float pick = float(pcg(uint(gl_VertexID) * 5u + 77u)) / 4294967296.0;
+  bool point = S.rest > 1.5, rest = (S.rest > 0.5 && !point && pick < ${CONFIG.life.dust.toFixed(3)}) || (point && pick < ${CONFIG.life.point.toFixed(3)});
+  if ((st > 1.5 && st < 2.5) || rest) o.p = mix(rest && point ? pointAt(id) : dustAt(id), o.p, le);
+  if (rest) o.alpha = max(o.alpha, (point ? ${CONFIG.life.pointAlpha.toFixed(3)} : ${CONFIG.life.dustAlpha.toFixed(3)}) * S.bright * (1.0 - le));
   return o;
 }
 void main() {
   Point o = swarm(u_to);
-  if (u_mix < 1.0) {                                      // morph: each particle flows from the old swarm to the new
+  float mid = ${((CONFIG.life.nothing.outEnd + CONFIG.life.nothing.inStart) / 2).toFixed(3)};
+  if (u_mix < 1.0 && u_morphStyle == ${MORPH_STYLES.length}) {
+    // Through nothing: each swarm's life, set from the change's progress, takes the old one apart and builds the new;
+    // a dot is the old swarm's until neither shows. Backdrop dots drift across from one to the other.
+    Point a = swarm(u_from);
+    if (a.bg > 0.5 && o.bg > 0.5) o = Point(mix(a.p, o.p, u_mix), mix(a.col, o.col, u_mix), mix(a.alpha, o.alpha, u_mix), o.size, 0.0, 1.0);
+    else if (u_mix < mid) { o = a; o.alpha *= 1.0 - a.bg * u_mix / mid; }
+    else o.alpha *= 1.0 - o.bg * (1.0 - (u_mix - mid) / (1.0 - mid));
+  } else if (u_mix < 1.0) {                               // morph: each particle flows from the old swarm to the new
     Point a = swarm(u_from);
     float id = float(gl_VertexID);
     float m = smoothstep(0.0, 1.0, clamp((u_mix - rnd(8u, u_to.seed) * 0.5) / 0.5, 0.0, 1.0));
@@ -1149,15 +1430,15 @@ void main() {
 export const ARRANGEMENTS = ['orbit', 'troupe', 'mirror'] as const;
 export type Arrangement = (typeof ARRANGEMENTS)[number];
 export const PATHS = ['sway', 'figure of eight', 'circle', 'step'] as const;
-export const MORPH_STYLES = ['own arcs', 'pour as one stream', 'dissolve and condense', 'grow from inside'] as const;
 
-/** A showing's picks, from its seed alone, so a set replays as it played. */
+/** A showing's picks, from its seed alone, so a set replays as it played. How it morphs in is the director's pick
+ *  (Transition); how it builds itself and comes apart is its own (BUILD_STYLES). */
 export function choices(seed: number) {
   const r = rng(Math.floor(seed * 1000) ^ 0x5eed);
-  return { arrangement: ARRANGEMENTS[Math.floor(r() * ARRANGEMENTS.length)], path: Math.floor(r() * PATHS.length), morph: Math.floor(r() * MORPH_STYLES.length) };
+  return { arrangement: ARRANGEMENTS[Math.floor(r() * ARRANGEMENTS.length)], path: Math.floor(r() * PATHS.length), build: Math.floor(r() * BUILD_STYLES.length) };
 }
 
-interface Showing { sw: Swarm; seed: number; pal: number[]; arrangement: Arrangement; path: number; morph: number; fills: boolean }
+interface Showing { sw: Swarm; seed: number; pal: number[]; arrangement: Arrangement; path: number; build: number; fills: boolean; lc: LifeCycle }
 
 /** A swarm's dots by role, in index order: backdrop, lead form, then each copy (CONFIG.fullness). A mirror copy has
  *  every dot of the lead, or it would not be a reflection. A swarm whose forms all fill the screen draws neither. */
@@ -1191,7 +1472,9 @@ function sharedProgram(g: WebGL2RenderingContext): Shared {
   return s;
 }
 
-function setSwarm(g: WebGL2RenderingContext, sh: Shared, name: 'u_to' | 'u_from', s: Showing) {
+const smooth = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+function setSwarm(g: WebGL2RenderingContext, sh: Shared, name: 'u_to' | 'u_from', s: Showing, life: number, rest: number) {
   const at = (k: string) => {
     const key = `${name}.${k}`;
     if (!sh.at.has(key)) sh.at.set(key, g.getUniformLocation(sh.prog, key));
@@ -1199,7 +1482,8 @@ function setSwarm(g: WebGL2RenderingContext, sh: Shared, name: 'u_to' | 'u_from'
   };
   const { sw } = s;
   const { backdrop, perSatellite, satellites } = layoutOf(s);
-  const floats = { backdrop, perSat: perSatellite, nsat: satellites, arrange: ARRANGEMENTS.indexOf(s.arrangement), path: s.path, count: sw.count, hold: sw.hold, morph: sw.morph, spin: sw.spin, kick: sw.kick, breathe: sw.breathe, cloud: sw.cloud, swirl: sw.swirl, size: sw.size, bright: sw.bright, hueSpeed: sw.hueSpeed, seed: s.seed };
+  const floats = { backdrop, perSat: perSatellite, nsat: satellites, arrange: ARRANGEMENTS.indexOf(s.arrangement), path: s.path, count: sw.count, hold: sw.hold, morph: sw.morph, spin: sw.spin, kick: sw.kick, breathe: sw.breathe, cloud: sw.cloud, swirl: sw.swirl, size: sw.size, bright: sw.bright, hueSpeed: sw.hueSpeed, seed: s.seed,
+    life, lifeStyle: s.lc.style, rest, copies: s.lc.copies, grow: CONFIG.life.larger };
   for (const [k, v] of Object.entries(floats)) g.uniform1f(at(k), v);
   g.uniform1i(at('clockBars'), sw.clock === 'bars' ? 1 : 0);
   g.uniform1i(at('stepTurn'), sw.stepTurn ? 1 : 0);
@@ -1213,7 +1497,7 @@ function setSwarm(g: WebGL2RenderingContext, sh: Shared, name: 'u_to' | 'u_from'
 export function particleScene(meta: { id: string; enabled?: boolean }, sw: Swarm, opts: SceneOpts = {}): Scene {
   let gl: WebGL2RenderingContext | null = null;
   let sh: Shared | null = null;
-  let morph: { start: number; seconds: number; count: number; from: Showing } | null = null;
+  let morph: { start: number; seconds: number; count: number; from: Showing; nothing: boolean; style: number } | null = null;
 
   const scene: Scene = {
     id: meta.id,
@@ -1228,9 +1512,12 @@ export function particleScene(meta: { id: string; enabled?: boolean }, sw: Swarm
       const seed = shaderSeed(s);
       // Palette for this showing, closed into a loop so the drifting colour has no seam: stops a b c d a.
       const stops = PALETTES[sw.palettes[seed % sw.palettes.length | 0]];
-      live.set(scene, { sw, seed, pal: [...stops, stops[0]].flat(), ...choices(seed), fills: sw.shapes.every((n) => FILLS_SCREEN.includes(n)) });
+      const picks = choices(seed);
+      const fills = sw.shapes.every((n) => FILLS_SCREEN.includes(n));
+      const lc = new LifeCycle(seed, picks.build, !sw.shapes.some((n) => FILLS_SCREEN.includes(n)), !fills);
+      live.set(scene, { sw, seed, pal: [...stops, stops[0]].flat(), ...picks, fills, lc });
     },
-    morphFrom(from, time, seconds, colour) {
+    morphFrom(from, time, seconds, colour, transition) {
       const old = live.get(from);
       const showing = live.get(scene);
       if (!old || !sh || !showing) return false;
@@ -1238,7 +1525,8 @@ export function particleScene(meta: { id: string; enabled?: boolean }, sw: Swarm
         const stops = PALETTES[nearestPalette(old.pal, sw.palettes)];
         showing.pal = [...stops, stops[0]].flat();
       }
-      morph = { start: time, seconds, count: Math.max(layoutOf(old).total, layoutOf(showing).total), from: old };
+      morph = { start: time, seconds, count: Math.max(layoutOf(old).total, layoutOf(showing).total), from: old,
+                nothing: transition.kind === 'nothing', style: transition.kind === 'morph' ? transition.style : 0 };
       return true;
     },
     render(time: number, f: Features, size: RenderSize) {
@@ -1247,11 +1535,14 @@ export function particleScene(meta: { id: string; enabled?: boolean }, sw: Swarm
       gl.useProgram(sh.prog);
       gl.bindVertexArray(sh.vao);
       setUniforms(gl, sh.loc, showing.seed, time, f, size, opts);
-      setSwarm(gl, sh, 'u_to', showing);
+      showing.lc.update(time, opts.deaf ? SILENT : f);
       const t = morph ? Math.min(1, Math.max(0, (time - morph.start) / morph.seconds)) : 1;
-      if (morph) setSwarm(gl, sh, 'u_from', morph.from);
+      // Through nothing: the old swarm comes apart by outEnd, its leftovers too; the new one builds from inStart.
+      const N = CONFIG.life.nothing;
+      setSwarm(gl, sh, 'u_to', showing, showing.lc.life * (morph?.nothing ? smooth(N.inStart, 1, t) : 1), showing.lc.rest);
+      if (morph) setSwarm(gl, sh, 'u_from', morph.from, morph.from.lc.life * (morph.nothing ? 1 - smooth(0, N.outEnd, t) : 1), morph.nothing ? REST.none : morph.from.lc.rest);
       gl.uniform1f(sh.mix, t);
-      gl.uniform1i(sh.style, showing.morph);
+      gl.uniform1i(sh.style, morph?.nothing ? MORPH_STYLES.length : (morph?.style ?? 0));
       const count = morph ? morph.count : layoutOf(showing).total;
       if (t >= 1) morph = null;
       gl.clearColor(0, 0, 0, 1);
@@ -1261,6 +1552,13 @@ export function particleScene(meta: { id: string; enabled?: boolean }, sw: Swarm
       gl.drawArrays(gl.POINTS, 0, count);
       gl.disable(gl.BLEND);
       gl.clearColor(0, 0, 0, 0);
+    },
+    describe() {
+      const s = live.get(scene);
+      if (!s) return '';
+      const { lc } = s;
+      return `${s.arrangement}, ${PATHS[s.path]}, builds: ${BUILD_STYLES[s.build]}   life ${lc.life.toFixed(2)}`
+        + `${lc.breakdown ? `  last breakdown: ${lc.breakdown}` : ''}${lc.copies === 1 ? '  larger' : lc.copies > 1 ? `  ${lc.copies} copies` : ''}`;
     },
     dispose() {
       live.delete(scene);   // the shared program stays for the next swarm

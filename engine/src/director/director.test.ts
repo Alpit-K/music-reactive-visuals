@@ -167,7 +167,45 @@ describe('Director', () => {
       const start = d.update(input())!;
       const dec = d.update(input({ time: CONFIG.director.minStayS, bar: 1, barLine: true, character: 'peak' }))!;
       expect(dec.sceneId).toBe('ps');
-      expect(dec.crossfadeBeats).toBe(start.sceneId === 'g1' ? CONFIG.director.crossfadeBeats.character : CONFIG.director.morphBeats);
+      const swarmBeats = { morph: CONFIG.director.morphBeats, nothing: CONFIG.director.transition.nothingBeats, cut: 0 }[dec.transition.kind];
+      expect(dec.crossfadeBeats).toBe(start.sceneId === 'g1' ? CONFIG.director.crossfadeBeats.character : swarmBeats);
+    }
+  });
+
+  it('changes swarm to swarm by morph, through nothing or a cut, never the same way twice running', () => {
+    const scenes = ['s1', 's2', 's3'].map((id) => ({ id, pools: ['main'] as Pool[], swarm: true }));
+    const d = new Director([...scenes, { id: 'idle', pools: ['idle'] as Pool[] }], 7);
+    d.update(input());
+    const seen = new Set<string>();
+    let last = '';
+    for (let n = 1; n <= 200; n++) {
+      const bar = n * CONFIG.director.rotateBars;
+      const dec = d.update(input({ time: bar * 2, bar, barLine: true }))!;
+      expect(dec.event).toBe('rotate');
+      const way = JSON.stringify(dec.transition);
+      expect(way).not.toBe(last);
+      last = way;
+      seen.add(dec.transition.kind);
+      if (dec.transition.kind === 'cut') expect(dec.crossfadeS).toBe(0);
+      if (dec.transition.kind === 'nothing') expect(dec.crossfadeBeats).toBe(CONFIG.director.transition.nothingBeats);
+    }
+    expect([...seen].sort()).toEqual(['cut', 'morph', 'nothing']);
+  });
+
+  it('only morphs into and out of the breakdown pool', () => {
+    const scenes = [
+      { id: 'g1', pools: ['main'] as Pool[], swarm: true }, { id: 'o1', pools: ['breakdown'] as Pool[], swarm: true },
+      { id: 'idle', pools: ['idle'] as Pool[] },
+    ];
+    for (let seed = 1; seed <= 20; seed++) {
+      const d = new Director(scenes, seed);
+      d.update(input());
+      const into = longBreakdown(d, 10, 5);
+      expect(into.event).toBe('breakdown');
+      expect(into.transition.kind).toBe('morph');
+      const back = d.update(input({ time: 60, bar: 30 }))!;
+      expect(back.event).toBe('drop');
+      expect(back.transition.kind).toBe('morph');
     }
   });
 

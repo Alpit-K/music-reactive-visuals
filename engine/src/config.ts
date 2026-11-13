@@ -46,6 +46,21 @@ export const CONFIG = {
     // Troupe: three forms in a line, copies with half the lead's dots; mirror: lead and reflection side by side.
     troupeShare: 0.5, troupeScale: 0.55, troupeGap: 1.3, mirrorScale: 0.6, mirrorGap: 1.0,
   },
+  // The life cycle (scenes/lifeCycle.ts, 2026-11-13): a swarm comes apart once the kick has been out outStartBars, gone
+  // outBars later — 8 bars out, as the breakdown flag (spike-findings §6: shorter gaps catch fills and blends; the user:
+  // "2 bars without kick happen within the same song lot of times"), so a 4-bar break only dims it a little — and
+  // builds back over backBars when the kick returns. Past maxOutBars out it is no breakdown: it builds back. A breakdown
+  // within repickBars of the last keeps that one's pick (a fill kick in a breakdown). Each pick is never the last one.
+  life: {
+    outStartBars: 4, outBars: 4, backBars: 1, maxOutBars: 32, repickBars: 16, soft: 0.3,
+    breakdown: { vanish: 0.3, dust: 0.25, point: 0.2, hold: 0.25 },
+    drop: { copies: 0.45, larger: 0.25, same: 0.3 },
+    copies: [2, 3, 4, 6, 9], larger: 1.3,
+    // Left when it has come apart: a quarter of the dots as drifting dust, or 4% as one glowing point.
+    dust: 0.25, dustAlpha: 0.35, point: 0.04, pointAlpha: 0.5, pointRadius: 0.07,
+    // Through nothing: the old swarm is gone by outEnd of the change, the new one starts at inStart.
+    nothing: { outEnd: 0.3, inStart: 0.38 },
+  },
   swellS: 0.6, // time constant of the smoothed bass the swarms swell with (2026-10-09: raw bass made them bounce)
   director: {
     rotateBars: 64,
@@ -55,6 +70,10 @@ export const CONFIG = {
     longBreakdownS: 30,
     afterDropBars: 8, // no rotation this soon after a drop
     crossfadeBeats: { character: 4, breakdown: 8, drop: 4 },
+    // A rotation or character change between two swarms picks one of these, never the one it picked last (2026-11-13:
+    // "I don't want this repetitive pattern"). Morph is split evenly over MORPH_STYLES. Through nothing takes longer:
+    // ~2 bars out, a breath of nothing, ~4 bars in.
+    transition: { weights: { morph: 0.6, nothing: 0.3, cut: 0.1 }, nothingBeats: 24 },
     morphBeats: 8, // a change between two swarms flows the points over at least this long (user's pick on the curation page, 2026-11-12; was 16)
     rotateBeats: { breakdown: 8, main: 4, dark: 4, peak: 8, idle: 8 },
     immediateCrossfadeS: 4,

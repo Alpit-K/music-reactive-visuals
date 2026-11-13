@@ -1,5 +1,6 @@
 import { CONFIG } from '../config';
-import type { Character, Pool } from '../scenes/types';
+import { pickExcept } from '../scenes/lifeCycle';
+import { MORPH_STYLES, type Character, type Pool, type Transition } from '../scenes/types';
 import { rng } from './rng';
 
 export type DirectorEvent = 'start' | 'character' | 'breakdown' | 'drop' | 'rotate' | 'silence' | 'audio-returns' | 'scene-failed' | 'interlude' | 'interlude-ends';
@@ -20,6 +21,7 @@ export interface Decision {
   crossfadeBeats: number | null;
   crossfadeS: number;
   colour: 'near' | 'own'; // near: the new scene takes the palette closest to the one showing; own: its own (a character change)
+  transition: Transition;  // swarm to swarm; a crossfade between other scenes ignores it
 }
 
 export interface DirectorInput {
@@ -48,9 +50,12 @@ export class Director {
   private shown = 0;
   private disabled = new Set<string>();
   private rand: () => number;
+  private transitionRand: () => number; // its own stream, so picking a transition leaves the scene picks as they were
+  private lastTransition: string | null = null;
 
   constructor(private scenes: DirectorScene[], seed: number) {
     this.rand = rng(seed);
+    this.transitionRand = rng(seed ^ 0x7a17);
   }
 
   update(i: DirectorInput): Decision | null {
@@ -158,7 +163,19 @@ export class Director {
 
   // A decision that changes nothing on screen, for the log: the drop after a breakdown that kept its scene.
   private mark(event: DirectorEvent, i: DirectorInput): Decision {
-    return { time: i.time, bar: i.bar, event, sceneId: this.current!, seed: this.seed, level: i.character, crossfadeBeats: 0, crossfadeS: 0, colour: 'near' };
+    return { time: i.time, bar: i.bar, event, sceneId: this.current!, seed: this.seed, level: i.character, crossfadeBeats: 0, crossfadeS: 0, colour: 'near', transition: { kind: 'morph', style: 0 } };
+  }
+
+  // A rotation or character change between two swarms draws from the whole menu (CONFIG.director.transition); the
+  // breakdown pool and the drop only morph. Never the pick before.
+  private transition(menu: boolean): Transition {
+    const W = CONFIG.director.transition.weights;
+    const weights: Record<string, number> = {};
+    MORPH_STYLES.forEach((_, s) => (weights[`morph ${s}`] = W.morph / MORPH_STYLES.length));
+    if (menu) Object.assign(weights, { nothing: W.nothing, cut: W.cut });
+    const k = pickExcept(weights, this.lastTransition, this.transitionRand());
+    this.lastTransition = k;
+    return k === 'nothing' ? { kind: 'nothing' } : k === 'cut' ? { kind: 'cut' } : { kind: 'morph', style: Number(k.split(' ')[1]) };
   }
 
   private show(f: Pool, event: DirectorEvent, i: DirectorInput, beats: number | null, from: Pool = f, keep?: { id: string; seed: number }): Decision | null {
@@ -177,7 +194,11 @@ export class Director {
     }
 
     const isSwarm = (id: string | null) => this.scenes.some((s) => s.id === id && s.swarm);
-    if (beats !== null && beats > 0 && isSwarm(this.current) && isSwarm(pick.id)) beats = Math.max(beats, CONFIG.director.morphBeats);
+    let transition: Transition = { kind: 'morph', style: 0 };
+    if (beats !== null && beats > 0 && isSwarm(this.current) && isSwarm(pick.id)) {
+      transition = this.transition(event === 'rotate' || event === 'character');
+      beats = transition.kind === 'nothing' ? CONFIG.director.transition.nothingBeats : transition.kind === 'cut' ? 0 : Math.max(beats, CONFIG.director.morphBeats);
+    }
     if (f === 'breakdown' && this.active !== 'breakdown' && this.current !== null) this.beforeBreakdown = { id: this.current, seed: this.seed, bar: this.sceneBar };
     this.current = pick.id;
     this.active = f;
@@ -186,6 +207,6 @@ export class Director {
     this.sceneTime = i.time;
     this.lastShown.set(pick.id, ++this.shown);
     const crossfadeS = beats === 0 ? 0 : beats !== null && i.bpm ? (beats * 60) / i.bpm : CONFIG.director.immediateCrossfadeS;
-    return { time: i.time, bar: i.bar, event, sceneId: pick.id, seed, level: i.character, crossfadeBeats: beats !== null && i.bpm ? beats : null, crossfadeS, colour: event === 'character' ? 'own' : 'near' };
+    return { time: i.time, bar: i.bar, event, sceneId: pick.id, seed, level: i.character, crossfadeBeats: beats !== null && i.bpm ? beats : null, crossfadeS, colour: event === 'character' ? 'own' : 'near', transition };
   }
 }

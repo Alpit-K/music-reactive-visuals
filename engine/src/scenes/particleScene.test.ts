@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { ARRANGEMENTS, choices, FILLS_GLSL, FILLS_SCREEN, layout, MORPH_STYLES, PATHS, SHAPES } from './particleScene';
+import { BUILD_STYLES } from './lifeCycle';
+import { ARRANGEMENTS, choices, FILLS_GLSL, FILLS_SCREEN, layout, PATHS, SHAPES } from './particleScene';
 import { loadShaderScenes } from './registry';
 
 describe('swarm forms for curation', () => {
@@ -53,16 +54,16 @@ describe('choices per showing', () => {
     expect(choices(123.5)).toEqual(choices(123.5));
   });
 
-  it('reach every arrangement, dance path and morph style across seeds', () => {
-    const seen = { arrangement: new Set(), path: new Set(), morph: new Set() };
+  it('reach every arrangement, dance path and build style across seeds', () => {
+    const seen = { arrangement: new Set(), path: new Set(), build: new Set() };
     for (let s = 0; s < 1000; s++) {
       const c = choices(s + 0.5);
       seen.arrangement.add(c.arrangement);
       seen.path.add(c.path);
-      seen.morph.add(c.morph);
+      seen.build.add(c.build);
     }
     expect(seen.arrangement.size).toBe(ARRANGEMENTS.length);
     expect(seen.path.size).toBe(PATHS.length);
-    expect(seen.morph.size).toBe(MORPH_STYLES.length);
+    expect(seen.build.size).toBe(BUILD_STYLES.length);
   });
 });

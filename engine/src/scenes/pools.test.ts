@@ -19,7 +19,7 @@ describe('pools', () => {
 
   it('lists every pool a scene is in, in pool order', () => {
     expect(poolsOf('organic-curves')).toEqual(['breakdown', 'interlude']);
-    expect(poolsOf('interlude-particles')).toEqual(['interlude']);
+    expect(poolsOf('interlude-particles')).toEqual(['dark', 'peak', 'interlude']);
     expect(poolsOf('no-such-scene')).toEqual([]);
   });
 });

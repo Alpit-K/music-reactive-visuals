@@ -1,5 +1,5 @@
 import { CONFIG } from '../config';
-import { SILENT, type Features, type Scene } from '../scenes/types';
+import { SILENT, type Features, type Scene, type Transition } from '../scenes/types';
 import { FlashLimiter } from './flashLimiter';
 import { FULLSCREEN_VERT, createTarget, deleteTarget, program, type Target } from './gl';
 
@@ -104,7 +104,7 @@ export class Compositor {
     }
   }
 
-  show(scene: Scene, seed: number, crossfadeS: number, time: number, colour: 'near' | 'own' = 'near'): void {
+  show(scene: Scene, seed: number, crossfadeS: number, time: number, colour: 'near' | 'own' = 'near', transition: Transition = { kind: 'morph', style: 0 }): void {
     const gl = this.gl;
     if (this.b) this.finishFade(); // a new decision mid-fade: the incoming scene becomes current at once
     if (this.a?.scene === scene) {
@@ -124,7 +124,7 @@ export class Compositor {
       return;
     }
     // Swarm to swarm: the points flow from one scene into the next, instead of two pictures crossfading.
-    if (scene.morphFrom?.(this.a.scene, time, crossfadeS, colour)) {
+    if (scene.morphFrom?.(this.a.scene, time, crossfadeS, colour, transition)) {
       this.drop(this.a);
       this.a = slot;
       return;

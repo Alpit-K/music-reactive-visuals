@@ -52,7 +52,7 @@ async function start() {
 
   function apply(dec: Decision) {
     sceneLog.push(dec);
-    compositor.show(scenes.get(dec.sceneId)!, dec.seed, dec.crossfadeS, nowS(), dec.colour);
+    compositor.show(scenes.get(dec.sceneId)!, dec.seed, dec.crossfadeS, nowS(), dec.colour, dec.transition);
   }
 
   for (const s of loadShaderScenes()) if (s.enabled) scenes.set(s.id, s);

@@ -29,6 +29,11 @@ export interface Features {
 
 export interface RenderSize { width: number; height: number }
 
+/** How one swarm gives way to the next (design §6, 2026-11-13): its dots flow across in one of MORPH_STYLES, or it
+ *  goes through nothing — the old one comes apart and the new one builds itself — or it cuts on the bar line. */
+export const MORPH_STYLES = ['own arcs', 'pour as one stream', 'dissolve and condense', 'grow from inside'] as const;
+export type Transition = { kind: 'morph'; style: number } | { kind: 'nothing' } | { kind: 'cut' };
+
 export interface Scene {
   id: string;
   source: string;   // "original" or where it came from
@@ -40,9 +45,11 @@ export interface Scene {
   /** Swarms only: take over the points of `from`, still showing, and flow them into this scene over `seconds`.
    *  `colour` near: take the palette closest to the one showing; own: keep this showing's. False if `from` is not a
    *  swarm, and the caller crossfades instead. */
-  morphFrom?(from: Scene, time: number, seconds: number, colour: 'near' | 'own'): boolean;
+  morphFrom?(from: Scene, time: number, seconds: number, colour: 'near' | 'own', transition: Transition): boolean;
   /** Curation only: one scene per form of a swarm of several forms, so each form can be judged alone. */
   forms?(): Scene[];
+  /** Curation only: this showing's picks and where its life cycle stands, for the HUD. */
+  describe?(): string;
 }
 
 /** Features of silence: what scenes see before audio opens. */

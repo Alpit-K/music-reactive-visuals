@@ -98,7 +98,7 @@ for (let n = 0; n < (query.includes('pair=') ? 1 : total); n++) {
   const d = (await times).slice(1).sort((a, b) => a - b);
   // Scene errors (a shader that fails to compile) are listed under the HUD's key line, not logged to the console.
   const hud = (await evaluate(`document.getElementById('hud').textContent`)).split('\n');
-  errors.push(...hud.slice(hud.findIndex((l) => l.includes('fullscreen')) + 1).filter(Boolean));
+  errors.push(...hud.slice(hud.findIndex((l) => l.startsWith('c copy changes')) + 1).filter(Boolean));
   const p95 = d[Math.floor(d.length * 0.95)], p99 = d[Math.floor(d.length * 0.99)], max = d[d.length - 1];
   console.log(`${name.padEnd(70)} p95 ${p95.toFixed(1).padStart(5)}  p99 ${p99.toFixed(1).padStart(5)}  max ${max.toFixed(1).padStart(6)}  tiles ${String(count).padStart(2)}/48  corners ${corners}/4  sway ${(hi - lo).toFixed(2)}${errors.length ? `  ERR ${errors.splice(0).join(' | ')}` : ''}`);
   await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }))`);
