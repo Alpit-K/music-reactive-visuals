@@ -1169,7 +1169,7 @@ ${FILLS_GLSL}struct Swarm {
   float count, hold, morph, spin, kick, breathe, cloud, swirl, size, bright, hueSpeed, seed;
   float backdrop, perSat, nsat;                           // dots in the backdrop and in each copy, and how many copies: layout()
   float arrange, path;                                    // index into ARRANGEMENTS and PATHS, picked per showing: choices()
-  float life, lifeStyle, rest, copies, grow;              // the life cycle (lifeCycle.ts): how much is built, how, what is left, copies
+  float life, lifeStyle, rest, gather, copies, grow;      // the life cycle (lifeCycle.ts): how much is built, how, what is left and how far it has gathered, copies
   bool clockBars, stepTurn, facing;
   int nshapes;
   int shapes[${SHAPES.length}];
@@ -1211,10 +1211,10 @@ vec3 dustAt(float id) {
   return vec3((r.x * 2.0 - 1.0) * 2.1, (r.y * 2.0 - 1.0) * 1.2, (r.z * 2.0 - 1.0) * 0.6)
        + 0.15 * vec3(sin(u_time * 0.13 + r.y * 30.0), cos(u_time * 0.11 + r.x * 30.0), 0.0);
 }
-vec3 pointAt(float id) {
+vec3 pointAt(float id, float gather) {
   uint u = uint(id) * 3u + 2029u;
   vec2 r = vec2(float(pcg(u)), float(pcg(u + 1u))) / 4294967296.0;
-  return sphereDir(r) * ${CONFIG.life.pointRadius.toFixed(3)} * (1.0 + 0.5 * u_swell) * pow(float(pcg(u + 2u)) / 4294967296.0, 0.33);
+  return sphereDir(r) * ${CONFIG.life.pointRadius.toFixed(3)} * (1.0 + ${(CONFIG.life.gatherRadius - 1).toFixed(3)} * gather) * (1.0 + 0.5 * u_swell) * pow(float(pcg(u + 2u)) / 4294967296.0, 0.33);
 }
 // One particle of one swarm, turned to face the camera but not yet projected. Its index says its role (layout()):
 // the backdrop first, then the lead form, then each satellite — so a morph pairs backdrop with backdrop.
@@ -1329,11 +1329,12 @@ Point swarm(Swarm S) {
   // dust fly in from it, and the dots left when the form has come apart (REST) rest as dust or one glowing point.
   o.alpha *= st < 0.5 ? smoothstep(0.0, 0.5, lp) * (1.0 + 1.5 * sin(PI * lp)) : st < 1.5 ? smoothstep(0.0, 0.4, lp)
            : st < 2.5 ? smoothstep(0.0, 0.6, lp) : smoothstep(0.0, 0.25, lp);
-  o.size *= mix(0.4, 1.0, lp);
   float pick = float(pcg(uint(gl_VertexID) * 5u + 77u)) / 4294967296.0;
-  bool point = S.rest > 1.5, rest = (S.rest > 0.5 && !point && pick < ${CONFIG.life.dust.toFixed(3)}) || (point && pick < ${CONFIG.life.point.toFixed(3)});
-  if ((st > 1.5 && st < 2.5) || rest) o.p = mix(rest && point ? pointAt(id) : dustAt(id), o.p, le);
-  if (rest) o.alpha = max(o.alpha, (point ? ${CONFIG.life.pointAlpha.toFixed(3)} : ${CONFIG.life.dustAlpha.toFixed(3)}) * S.bright * (1.0 - le));
+  // What is left gathers through a build (S.gather): the dust thickens to every dot, the point takes more and swells.
+  bool point = S.rest > 1.5, rest = (S.rest > 0.5 && !point && pick < mix(${CONFIG.life.dust.toFixed(3)}, 1.0, S.gather)) || (point && pick < mix(${CONFIG.life.point.toFixed(3)}, ${CONFIG.life.gatherPoint.toFixed(3)}, S.gather));
+  if ((st > 1.5 && st < 2.5) || rest) o.p = mix(rest && point ? pointAt(id, S.gather) : dustAt(id), o.p, le);
+  o.size *= mix(0.4, 1.0, rest ? max(lp, S.gather) : lp);
+  if (rest) o.alpha = max(o.alpha, (point ? ${CONFIG.life.pointAlpha.toFixed(3)} : ${CONFIG.life.dustAlpha.toFixed(3)}) * S.bright * mix(1.0, ${CONFIG.life.gatherBright.toFixed(3)}, S.gather) * (1.0 - le));
   return o;
 }
 void main() {
@@ -1401,7 +1402,9 @@ void main() {
   o.p.xy *= 1.0 - ${CONFIG.build.tighten.toFixed(4)} * u_tension * (1.0 - f);
   o.alpha *= 1.0 + ${CONFIG.build.brighten.toFixed(4)} * u_tension * (1.0 - o.bg);
   float burst = u_drop < ${CONFIG.burst.outS.toFixed(4)} ? smoothstep(0.0, ${CONFIG.burst.outS.toFixed(4)}, u_drop) : exp(-(u_drop - ${CONFIG.burst.outS.toFixed(4)}) * 3.0 / ${CONFIG.burst.backS.toFixed(4)});
+  burst *= mix(${CONFIG.burst.small.toFixed(4)}, 1.0, u_dropSize);
   o.p.xy *= 1.0 + ${CONFIG.burst.scale.toFixed(4)} * burst;
+  o.alpha *= 1.0 + ${CONFIG.burst.flash.toFixed(4)} * burst;
   o.p.xy = mix(o.p.xy, still, o.bg);
   float z = o.p.z + 2.6;                                  // camera 2.6 units back
   if (z < 0.15) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; v_alpha = 0.0; return; } // behind the camera
@@ -1483,7 +1486,7 @@ function setSwarm(g: WebGL2RenderingContext, sh: Shared, name: 'u_to' | 'u_from'
   const { sw } = s;
   const { backdrop, perSatellite, satellites } = layoutOf(s);
   const floats = { backdrop, perSat: perSatellite, nsat: satellites, arrange: ARRANGEMENTS.indexOf(s.arrangement), path: s.path, count: sw.count, hold: sw.hold, morph: sw.morph, spin: sw.spin, kick: sw.kick, breathe: sw.breathe, cloud: sw.cloud, swirl: sw.swirl, size: sw.size, bright: sw.bright, hueSpeed: sw.hueSpeed, seed: s.seed,
-    life, lifeStyle: s.lc.style, rest, copies: s.lc.copies, grow: CONFIG.life.larger };
+    life, lifeStyle: s.lc.style, rest, gather: s.lc.gather, copies: s.lc.copies, grow: CONFIG.life.larger };
   for (const [k, v] of Object.entries(floats)) g.uniform1f(at(k), v);
   g.uniform1i(at('clockBars'), sw.clock === 'bars' ? 1 : 0);
   g.uniform1i(at('stepTurn'), sw.stepTurn ? 1 : 0);

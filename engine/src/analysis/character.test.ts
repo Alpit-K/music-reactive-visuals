@@ -118,15 +118,41 @@ describe('CharacterModel — dark', () => {
     expect(out.slice(59).every((c) => c === 'dark')).toBe(true);
   });
 
-  it('returns to main once the 120 s median falls below 133', () => {
-    const out = tempoPerSecond([...fill(200, 138), ...fill(200, 132)]);
-    expect(out[259]).toBe('dark'); // 60 of 120 seconds at 132: the median is still 138
+  it('returns to main once the 120 s median is 7 under the fastest it held while dark', () => {
+    const out = tempoPerSecond([...fill(200, 138), ...fill(200, 131)]);
+    expect(out[259]).toBe('dark'); // 60 of 120 seconds at 131: the median is still 138
     expect(out[260]).toBe('main'); // 61 of 120
+    expect(tempoPerSecond([...fill(200, 138), ...fill(200, 141), ...fill(200, 135)]).slice(59).every((c) => c === 'dark')).toBe(true); // 6 under 141
+    expect(tempoPerSecond([...fill(200, 138), ...fill(200, 141), ...fill(200, 134)]).at(-1)).toBe('main');
   });
 
-  it('holds dark between 133 and 136, and never enters there', () => {
-    expect(tempoPerSecond([...fill(200, 138), ...fill(200, 134)]).slice(59).every((c) => c === 'dark')).toBe(true);
-    expect(tempoPerSecond(fill(300, 134)).every((c) => c === 'main')).toBe(true);
+  it('never enters between 130 and 136 in a set that opened there', () => {
+    expect(tempoPerSecond(fill(900, 134)).every((c) => c === 'main')).toBe(true);
+  });
+
+  it('turns dark 7 BPM above the tempo of the first 10 minutes of the set', () => {
+    const out = tempoPerSecond([...fill(600, 126), ...fill(300, 132), ...fill(300, 134)]);
+    expect(out.slice(0, 959).every((c) => c === 'main')).toBe(true); // 132 is 6 above
+    expect(out[959]).toBe('dark'); // 60 of the last 120 seconds at 134
+  });
+
+  it('turns dark again 7 above the slowest tempo since dark ended, never under 130', () => {
+    const spell = [...fill(200, 140), ...fill(200, 132)]; // dark, then main from 132
+    expect(tempoPerSecond([...spell, ...fill(200, 138)]).at(-1)).toBe('main'); // 6 above 132, though past 136
+    expect(tempoPerSecond([...spell, ...fill(200, 139)]).at(-1)).toBe('dark');
+    expect(tempoPerSecond([...spell, ...fill(200, 120), ...fill(200, 128)]).at(-1)).toBe('main'); // 8 above 120, under 130
+    expect(tempoPerSecond([...spell, ...fill(200, 120), ...fill(200, 130)]).at(-1)).toBe('dark');
+  });
+
+  it('never starts dark under 130, however slow the set opened', () => {
+    expect(tempoPerSecond([...fill(600, 118), ...fill(300, 128)]).every((c) => c === 'main')).toBe(true);
+    expect(tempoPerSecond([...fill(600, 118), ...fill(300, 131)]).at(-1)).toBe('dark');
+  });
+
+  it('still turns dark at 136 in a set that opened fast', () => {
+    const out = tempoPerSecond([...fill(700, 133), ...fill(200, 137)]);
+    expect(out[758]).toBe('main');
+    expect(out[759]).toBe('dark');
   });
 
   it('rides out a 30 s tempo misread', () => {

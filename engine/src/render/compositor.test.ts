@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { SILENT, type Scene } from '../scenes/types';
-import { Compositor } from './compositor';
+import { CONFIG } from '../config';
+import { Compositor, echoStep } from './compositor';
 
 // Enough of WebGL2 for the compositor to build its targets and programs: every call succeeds.
 const fakeGl = new Proxy({} as Record<string | symbol, unknown>, {
@@ -52,5 +53,57 @@ describe('Compositor.show', () => {
     c.show({ ...scene('b', calls), morphFrom: () => false }, 2, 7, 10);
     c.render(11, SILENT);
     expect(calls).toEqual(['a.init', 'b.init', 'a.render@11', 'b.render@11']);
+  });
+});
+
+describe('echoStep', () => {
+  it('fades by half over the half-life and zooms by the configured rate, whatever the frame rate', () => {
+    for (const echo of ['trail', 'out', 'in'] as const) {
+      const s = CONFIG.echo.styles[echo];
+      const whole = echoStep(echo, s.halfLifeS);
+      expect(whole.keep).toBeCloseTo(0.5);
+      expect(whole.zoom).toBeCloseTo(Math.exp(s.zoomPerS * s.halfLifeS));
+      const frame = echoStep(echo, s.halfLifeS / 30); // thirty frames make the same as one long one
+      expect(frame.keep ** 30).toBeCloseTo(whole.keep);
+      expect(frame.zoom ** 30).toBeCloseTo(whole.zoom);
+    }
+  });
+});
+
+describe('Compositor.setEcho', () => {
+  it('lets an echo go over releaseBeats, not at once, and takes it back if turned on meanwhile', () => {
+    const c = new Compositor(fakeGl, () => {});
+    const at128 = { ...SILENT, bpm: 128 };
+    const releaseS = (CONFIG.echo.releaseBeats * 60) / 128;
+    let t = 0;
+    const run = (seconds: number) => { for (const end = t + seconds; t < end - 1e-9; ) c.render((t += 1 / 60), at128); };
+    c.setEcho('out');
+    run(1);
+    c.setEcho('off');
+    run(releaseS * 0.9);
+    expect(c.drawnEcho).toBe('out'); // still shrinking
+    c.setEcho('trail');
+    run(releaseS * 2);
+    expect(c.drawnEcho).toBe('trail'); // back on, no release pending
+    c.setEcho('off');
+    run(releaseS * 1.1);
+    expect(c.drawnEcho).toBe('off');
+  });
+
+  it('shrinks the wake to nothing as it is let go', () => {
+    expect(echoStep('out', 1 / 60, 0.5).keep).toBeCloseTo(echoStep('out', 1 / 30).keep); // half the length: fades twice as fast
+    expect(echoStep('out', 1 / 60, 0).keep).toBe(0);
+  });
+
+  it('renders with an echo on and after it goes off again', () => {
+    const calls: string[] = [];
+    const c = new Compositor(fakeGl, () => {});
+    c.show(scene('a', calls), 1, 0, 0);
+    c.setEcho('out');
+    c.render(1, SILENT);
+    c.render(1.016, SILENT);
+    c.setEcho('off');
+    c.render(1.033, SILENT);
+    expect(calls).toEqual(['a.init', 'a.render@1', 'a.render@1.016', 'a.render@1.033']);
   });
 });

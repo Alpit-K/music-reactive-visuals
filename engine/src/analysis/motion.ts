@@ -15,6 +15,7 @@ export class MotionFeatures {
   private lastPlaying = -Infinity; // the latest kick of the kick playing — a lone fill kick is not one
   private seenKick = false;
   private dropT: number | null = null;
+  private dropSize = 0;
   private lastT: number | null = null;
 
   /** `calm`: silence or an ambient interlude — no build there, however long the kick has been out. */
@@ -31,14 +32,24 @@ export class MotionFeatures {
       this.seenKick = true;
       this.interval = this.prevSinceKick + dt;
       const sinceBurst = this.dropT === null ? Infinity : t - this.dropT;
-      if (t - this.lastPlaying >= c.burstGapBars * bar && sinceBurst >= 2 * bar) this.dropT = t;
+      if (t - this.lastPlaying >= c.burstGapBars * bar && sinceBurst >= 2 * bar) {
+        this.dropT = t;
+        // How big a drop: by how long the kick was out — a 4-bar break is a small one, dropFullBars out a full one.
+        // The session's first kick ends no breakdown, so it is the smallest.
+        const outBars = Number.isFinite(this.lastPlaying) ? (t - this.lastPlaying) / bar : c.burstGapBars;
+        this.dropSize = Math.min(1, (outBars - c.burstGapBars) / (c.dropFullBars - c.burstGapBars));
+      }
       if (this.interval < c.playingBeats * beat) this.lastPlaying = t;
     }
     this.prevSinceKick = sinceKick;
 
     const playing = sinceKick < c.playingBeats * beat && this.interval < c.playingBeats * beat;
     const target = playing ? c.level[character] : 0;
-    this.groove += (target - this.groove) * (1 - Math.exp(-dt / c.grooveS));
+    // The drop's second kick — the first that shows the kick is playing, a beat after the burst — brings the dance at
+    // once; a kick out a whole bar lets it fall quickly. In between it eases, so a missed kick or a short fill barely shows.
+    if (kick && playing && this.dropT !== null && t - this.dropT < c.playingBeats * beat) this.groove = target;
+    const tau = !playing && sinceKick >= bar ? c.grooveFallS : c.grooveS;
+    this.groove += (target - this.groove) * (1 - Math.exp(-dt / tau));
 
     this.highs += (highs - this.highs) * (1 - Math.exp(-dt / c.highsS));
     // A build is the kick out between 1 and 32 bars, after the set has started and outside silence and interludes.
@@ -47,6 +58,6 @@ export class MotionFeatures {
     else this.tension = Math.max(0, this.tension - dt / c.tensionReleaseS);
     this.tensionTurn += dt * this.tension * c.tensionTurnRate;
 
-    return { groove: this.groove, tension: this.tension, tensionTurn: this.tensionTurn, sinceDrop: this.dropT === null ? Infinity : t - this.dropT };
+    return { groove: this.groove, tension: this.tension, tensionTurn: this.tensionTurn, sinceDrop: this.dropT === null ? Infinity : t - this.dropT, dropSize: this.dropSize };
   }
 }

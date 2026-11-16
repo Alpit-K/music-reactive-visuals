@@ -1,10 +1,11 @@
 import { Analysis } from './analysis/analysis';
 import { openBlackHole } from './audio/capture';
+import { Ears } from './audio/ears';
 import { CONFIG } from './config';
 import { Compositor } from './render/compositor';
 import { poolsOf } from './scenes/pools';
 import { loadShaderScenes } from './scenes/registry';
-import { MORPH_STYLES, SILENT, type Features, type Pool, type Scene, type Transition } from './scenes/types';
+import { ECHO_STYLES, MORPH_STYLES, SILENT, type Echo, type Features, type Pool, type Scene, type Transition } from './scenes/types';
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -26,6 +27,8 @@ async function fromFile(file: File) {
 }
 
 async function run(audio: { ctx: AudioContext; source: AudioNode; analyser: AnalyserNode }) {
+  const ears = new Ears(audio.ctx);
+  void ears.listen(audio.source);
   $('pick').remove();
   const gl = ($('wall') as HTMLCanvasElement).getContext('webgl2', { antialias: false, alpha: false })!;
   const errors: string[] = [];
@@ -52,6 +55,11 @@ async function run(audio: { ctx: AudioContext; source: AudioNode; analyser: Anal
   const WAYS: Transition[] = [...MORPH_STYLES.map((_, style) => ({ kind: 'morph' as const, style })), { kind: 'nothing' }, { kind: 'cut' }];
   const wayName = (w: Transition) => (w.kind === 'morph' ? `morph: ${MORPH_STYLES[w.style]}` : w.kind === 'nothing' ? 'through nothing' : 'cut');
   let way = 0;
+  // e cycles the echo under every scene from now on, swarm or not (the wall gives one only to swarms); ?echo=<style> starts
+  // with one, e.g. for a headless frame-time check.
+  const echoQuery = new URLSearchParams(location.search).get('echo');
+  let echo: Echo = ECHO_STYLES.find((s) => s === echoQuery) ?? 'off';
+  compositor.setEcho(echo);
   const show = () => {
     const w = WAYS[way];
     const seconds = w.kind === 'cut' ? 0 : w.kind === 'nothing' ? (CONFIG.director.transition.nothingBeats * 60) / (features.bpm ?? 128) : 0.5;
@@ -59,7 +67,7 @@ async function run(audio: { ctx: AudioContext; source: AudioNode; analyser: Anal
   };
   // k fakes a breakdown and its drop, so each scene's life cycle shows without waiting for one in the music: the kick
   // stops (out from then on) until k again, which is the drop if the kick was out 4 bars.
-  const sim = { outAt: null as number | null, back: null as number | null, dropAt: -Infinity };
+  const sim = { outAt: null as number | null, back: null as number | null, dropAt: -Infinity, size: 0 };
 
   // ?pair=<a>,<b>: the two scenes take turns every 16 bars, each change a morph as on the wall — to judge how one
   // scene flows into another (design §6).
@@ -111,7 +119,11 @@ async function run(audio: { ctx: AudioContext; source: AudioNode; analyser: Anal
       const t = (performance.now() - t0) / 1000;
       if (sim.outAt === null) sim.outAt = t;
       else {
-        if (t - sim.outAt >= (CONFIG.motion.burstGapBars * 240) / (features.bpm ?? CONFIG.motion.fallbackBpm)) sim.dropAt = t;
+        const outBars = (t - sim.outAt) / (240 / (features.bpm ?? CONFIG.motion.fallbackBpm));
+        if (outBars >= CONFIG.motion.burstGapBars) {
+          sim.dropAt = t;
+          sim.size = Math.min(1, (outBars - CONFIG.motion.burstGapBars) / (CONFIG.motion.dropFullBars - CONFIG.motion.burstGapBars));
+        }
         sim.outAt = null;
         sim.back = t;
       }
@@ -119,6 +131,11 @@ async function run(audio: { ctx: AudioContext; source: AudioNode; analyser: Anal
     }
     if (e.key === 't') {
       way = (way + 1) % WAYS.length;
+      return;
+    }
+    if (e.key === 'e') {
+      echo = ECHO_STYLES[(ECHO_STYLES.indexOf(echo) + 1) % ECHO_STYLES.length];
+      compositor.setEcho(echo);
       return;
     }
     if (e.key === 'c') {
@@ -146,8 +163,8 @@ async function run(audio: { ctx: AudioContext; source: AudioNode; analyser: Anal
     const faked = sim.outAt !== null || (sim.back !== null && t - sim.back < 0.05);
     if (faked) {
       const drop = sim.outAt === null;
-      features = { ...features, idle: false, interlude: false, kick: drop, sinceKick: drop ? 0 : t - sim.outAt!, sinceDrop: drop ? t - sim.dropAt : features.sinceDrop };
-    } else if (t - sim.dropAt < 5) features = { ...features, sinceDrop: t - sim.dropAt };
+      features = { ...features, idle: false, interlude: false, kick: drop, sinceKick: drop ? 0 : t - sim.outAt!, sinceDrop: drop ? t - sim.dropAt : features.sinceDrop, dropSize: drop ? sim.size : features.dropSize };
+    } else if (t - sim.dropAt < 5) features = { ...features, sinceDrop: t - sim.dropAt, dropSize: sim.size };
     compositor.render(t, features);
     if (pair) {
       if (features.barLine) turn.bars++;
@@ -171,9 +188,9 @@ async function run(audio: { ctx: AudioContext; source: AudioNode; analyser: Anal
     const pools = [...poolsNow(s.id)].sort((a, b) => order.indexOf(a) - order.indexOf(b));
     $('hud').textContent = [
       `${i + 1}/${list.length}  ${s.id}  [${offNow(s) ? 'OFF' : 'on'}]  pools: ${pools.join(', ') || 'none'}`,
-      `bpm ${features.bpm?.toFixed(1) ?? '—'}  ${features.character}${features.breakdown ? ' BREAKDOWN' : ''}${features.interlude ? ' INTERLUDE' : ''}${compositor.damped ? '  FLASH-DAMPED' : ''}`,
+      `bpm ${features.bpm?.toFixed(1) ?? '—'} (second hearing ${ears.read()?.bpm?.toFixed(1) ?? '—'})  ${features.character}${features.breakdown ? ' BREAKDOWN' : ''}${features.interlude ? ' INTERLUDE' : ''}${compositor.damped ? '  FLASH-DAMPED' : ''}`,
       s.describe?.() ?? '',
-      `← → step (t: ${wayName(WAYS[way])})   k ${sim.outAt === null ? 'breakdown' : `drop (kick out ${(t - sim.outAt).toFixed(0)} s)`}   m d p b i main/dark/peak/breakdown/interlude   x on/off   f fullscreen`,
+      `← → step (t: ${wayName(WAYS[way])})   e echo: ${echo}   k ${sim.outAt === null ? 'breakdown' : `drop (kick out ${(t - sim.outAt).toFixed(0)} s)`}   m d p b i main/dark/peak/breakdown/interlude   x on/off   f fullscreen`,
       `c copy changes (${changes().length})${note ? `  — ${note}` : ''}`,
       ...errors.slice(-3),
     ].join('\n');

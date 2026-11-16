@@ -44,6 +44,28 @@ describe('MotionFeatures', () => {
     }
   });
 
+  it('the dance is at its level by the second kick of a drop, and near gone 2 bars after the kick stops', () => {
+    const { m, state } = fresh();
+    run(m, 0, 10, { playing: () => true, state });
+    const out = run(m, 10, 10 + 8 * BAR, { playing: () => false, state });
+    expect(out[Math.round(2 * BAR * FPS)].groove).toBeLessThan(0.1);
+    const back = run(m, 10 + 8 * BAR, 10 + 8 * BAR + 2.2 * BEAT, { playing: () => true, state });
+    expect(last(back).groove).toBeCloseTo(0.6, 2);
+  });
+
+  it('a drop is sized by how long the kick was out: small after 4 bars, full after 16', () => {
+    const sizeAfter = (bars: number) => {
+      const { m, state } = fresh();
+      run(m, 0, 10, { playing: () => true, state });
+      const back = 10 + bars * BAR;
+      return last(run(m, 10, back + 2 * BEAT, { playing: (t) => t >= back, state })).dropSize;
+    };
+    expect(sizeAfter(5)).toBeLessThan(0.2);
+    expect(sizeAfter(10)).toBeGreaterThan(0.35);
+    expect(sizeAfter(10)).toBeLessThan(0.65);
+    expect(sizeAfter(17)).toBe(1);
+  });
+
   it('a lone kick lifts groove below 0.2', () => {
     const { m, state } = fresh();
     state.lastKick = 0;

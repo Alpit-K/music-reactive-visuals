@@ -4,11 +4,15 @@ import type { Pool } from './types';
 // 2026-10-10, and again 2026-11-13. One list, so the whole assignment reads on one screen; each scene's look stays in
 // its own file. A scene may sit in several pools; one in none is disabled in its file. Key order is pool order for poolsOf.
 // The physics- scenes and plotter (2026-11-13) were placed for the user to move on the curation page.
+// So were six more in main (2026-11-16, unseen by the user): ripples, radiolarian, jellyfish, pinecone, romanesco and
+// sunflower — 15 scenes went round twice in a relaxed hour, and the user asked for biological forms in relaxed music.
 export const POOLS: Record<Pool, readonly string[]> = {
   main: [
     'geometric-attractor', 'geometric-chladni', 'geometric-lasers', 'geometric-particles', 'geometric-plotter',
-    'geometric-shards', 'geometric-tesseract', 'interlude-contour', 'interlude-grain', 'organic-cells', 'organic-particles',
-    'physics-orbitals', 'physics-pendulums', 'psychedelic-particles', 'psychedelic-terrain',
+    'geometric-ripples', 'geometric-shards', 'geometric-tesseract', 'interlude-contour', 'interlude-grain',
+    'interlude-radiolarian', 'organic-cells', 'organic-jellyfish', 'organic-particles', 'organic-pinecone',
+    'organic-romanesco', 'organic-sunflower', 'physics-orbitals', 'physics-pendulums', 'psychedelic-particles',
+    'psychedelic-terrain',
   ],
   // Harder, faster stretches (design §5). The dark- swarms carry forms from the other swarms, with their motion.
   dark: [
@@ -21,7 +25,7 @@ export const POOLS: Record<Pool, readonly string[]> = {
   peak: [
     'geometric-particles', 'geometric-wire', 'interlude-particles', 'interlude-sea', 'organic-mitosis', 'organic-sunflower',
     'physics-horizon', 'physics-orbitals', 'psychedelic-blackhole', 'psychedelic-fire', 'psychedelic-liquid',
-    'psychedelic-plasma', 'psychedelic-volcano', 'psychedelic-vortex',
+    'psychedelic-plasma', 'psychedelic-vortex',
   ],
   // Only a breakdown whose flag holds 30 s draws from here (design §6); a shorter one keeps its scene.
   breakdown: [

@@ -192,6 +192,28 @@ describe('Director', () => {
     expect([...seen].sort()).toEqual(['cut', 'morph', 'nothing']);
   });
 
+  it('gives swarm showings an echo only when echo is on, and echo on or off leaves the scene picks as they were', () => {
+    const scenes = [
+      ...['s1', 's2', 's3'].map((id) => ({ id, pools: ['main'] as Pool[], swarm: true })),
+      { id: 'flat', pools: ['main'] as Pool[] }, { id: 'idle', pools: ['idle'] as Pool[] },
+    ];
+    const run = (echo: boolean) => {
+      const d = new Director(scenes, 3, echo);
+      const decs = [d.update(input())!];
+      for (let n = 1; n <= 200; n++) {
+        const bar = n * CONFIG.director.rotateBars;
+        decs.push(d.update(input({ time: bar * 2, bar, barLine: true }))!);
+      }
+      return decs;
+    };
+    const off = run(false);
+    const on = run(true);
+    expect(on.map((d) => [d.sceneId, d.seed, JSON.stringify(d.transition)])).toEqual(off.map((d) => [d.sceneId, d.seed, JSON.stringify(d.transition)]));
+    expect(new Set(off.map((d) => d.echo))).toEqual(new Set(['off']));
+    expect(new Set(on.filter((d) => d.sceneId === 'flat').map((d) => d.echo))).toEqual(new Set(['off']));
+    expect(new Set(on.filter((d) => d.sceneId !== 'flat').map((d) => d.echo))).toEqual(new Set(['off', 'trail', 'out', 'in']));
+  });
+
   it('only morphs into and out of the breakdown pool', () => {
     const scenes = [
       { id: 'g1', pools: ['main'] as Pool[], swarm: true }, { id: 'o1', pools: ['breakdown'] as Pool[], swarm: true },
@@ -250,6 +272,16 @@ describe('Director', () => {
     }
     const geometric = shown.filter((id) => fam(id) === 'main');
     expect(new Set(geometric.slice(0, 3)).size).toBe(3); // all three geometric scenes before any repeat
+  });
+
+  it('goes through a pool in a new order each pass, a scene waiting for half the pool before it returns', () => {
+    const pool = Array.from({ length: 10 }, (_, n) => ({ id: `main-${n}`, pools: ['main' as const] }));
+    const d = new Director(pool, 1);
+    const shown = [d.update(input())!.sceneId];
+    for (let bar = 64; shown.length < 40; bar += 64) shown.push(d.update(input({ bar, barLine: true }))!.sceneId);
+    expect(new Set(shown.slice(0, 10)).size).toBe(10); // every scene before any repeat
+    expect(shown.slice(10, 20)).not.toEqual(shown.slice(0, 10));
+    for (let n = 0; n < shown.length; n++) expect(shown.slice(n + 1, n + 5)).not.toContain(shown[n]);
   });
 
   it('keeps main geometric and peak psychedelic', () => {

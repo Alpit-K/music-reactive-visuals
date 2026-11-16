@@ -9,6 +9,7 @@ export interface Features {
   tension: number;        // 0..1: a build while the kick is out — grows with time out and the highs
   tensionTurn: number;    // radians turned by tension so far; only grows, so a form never spins back at the drop
   sinceDrop: number;      // seconds since the first kick after 4 bars without one (Infinity before one)
+  dropSize: number;       // 0..1: how big that drop was, by how long the kick had been out (4 bars .. 16)
   kick: boolean;          // onset on this frame
   sinceKick: number;      // seconds since the last kick (Infinity before the first)
   bpm: number | null;
@@ -34,6 +35,12 @@ export interface RenderSize { width: number; height: number }
 export const MORPH_STYLES = ['own arcs', 'pour as one stream', 'dissolve and condense', 'grow from inside'] as const;
 export type Transition = { kind: 'morph'; style: number } | { kind: 'nothing' } | { kind: 'cut' };
 
+/** The echo under a swarm showing (design §6, 2026-11-13, an idea from raVe): each frame keeps the brighter of the new
+ *  picture and the last one dimmed — trail where it was, out zoomed outward, in zoomed inward — so motion leaves a fading
+ *  wake. Drawn by the compositor, never by a scene. */
+export const ECHO_STYLES = ['off', 'trail', 'out', 'in'] as const;
+export type Echo = (typeof ECHO_STYLES)[number];
+
 export interface Scene {
   id: string;
   source: string;   // "original" or where it came from
@@ -54,6 +61,6 @@ export interface Scene {
 
 /** Features of silence: what scenes see before audio opens. */
 export const SILENT: Features = {
-  sub: 0, bass: 0, mids: 0, highs: 0, swell: 0, groove: 0, tension: 0, tensionTurn: 0, sinceDrop: Infinity, kick: false, sinceKick: Infinity, bpm: null, beat: 0, beatPhase: 0,
+  sub: 0, bass: 0, mids: 0, highs: 0, swell: 0, groove: 0, tension: 0, tensionTurn: 0, sinceDrop: Infinity, dropSize: 0, kick: false, sinceKick: Infinity, bpm: null, beat: 0, beatPhase: 0,
   bar: 0, barLine: false, character: 'main', breakdown: false, idle: true, surge: false, interlude: false, busyness: null, rmsDb: -120, subDominanceDb: null, tempoBpm: null,
 };

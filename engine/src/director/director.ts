@@ -1,6 +1,6 @@
 import { CONFIG } from '../config';
 import { pickExcept } from '../scenes/lifeCycle';
-import { MORPH_STYLES, type Character, type Pool, type Transition } from '../scenes/types';
+import { MORPH_STYLES, type Character, type Echo, type Pool, type Transition } from '../scenes/types';
 import { rng } from './rng';
 
 export type DirectorEvent = 'start' | 'character' | 'breakdown' | 'drop' | 'rotate' | 'silence' | 'audio-returns' | 'scene-failed' | 'interlude' | 'interlude-ends';
@@ -22,6 +22,7 @@ export interface Decision {
   crossfadeS: number;
   colour: 'near' | 'own'; // near: the new scene takes the palette closest to the one showing; own: its own (a character change)
   transition: Transition;  // swarm to swarm; a crossfade between other scenes ignores it
+  echo: Echo;              // swarms only, and only with echo on (CONFIG.echo.live); otherwise off
 }
 
 export interface DirectorInput {
@@ -52,10 +53,13 @@ export class Director {
   private rand: () => number;
   private transitionRand: () => number; // its own stream, so picking a transition leaves the scene picks as they were
   private lastTransition: string | null = null;
+  private echoRand: () => number; // its own stream too: echo on or off leaves the scene and transition picks as they were
+  private echo: Echo = 'off';
 
-  constructor(private scenes: DirectorScene[], seed: number) {
+  constructor(private scenes: DirectorScene[], seed: number, private echoOn = false) {
     this.rand = rng(seed);
     this.transitionRand = rng(seed ^ 0x7a17);
+    this.echoRand = rng(seed ^ 0xec40);
   }
 
   update(i: DirectorInput): Decision | null {
@@ -137,10 +141,14 @@ export class Director {
     return this.pool(f).filter((s) => s.id !== this.current);
   }
 
+  // Scenes never shown first; after that, any of the least recently shown share of the pool, so each pass through a
+  // pool comes in a new order and a scene still waits for the rest of that share before it returns.
   private oldest<T extends { id: string }>(options: T[]): T {
-    const oldest = Math.min(...options.map((s) => this.lastShown.get(s.id) ?? -Infinity));
-    const tied = options.filter((s) => (this.lastShown.get(s.id) ?? -Infinity) === oldest);
-    return tied[Math.floor(this.rand() * tied.length)];
+    const at = (s: T) => this.lastShown.get(s.id) ?? -Infinity;
+    const byAge = [...options].sort((a, b) => at(a) - at(b));
+    const unseen = byAge.filter((s) => at(s) === -Infinity);
+    const from = unseen.length > 0 ? unseen : byAge.slice(0, Math.ceil(byAge.length * CONFIG.director.pickFromOldest));
+    return from[Math.floor(this.rand() * from.length)];
   }
 
   // The drop cuts back to the music's own pool — main, dark or peak. Landing every drop on peak put
@@ -163,7 +171,7 @@ export class Director {
 
   // A decision that changes nothing on screen, for the log: the drop after a breakdown that kept its scene.
   private mark(event: DirectorEvent, i: DirectorInput): Decision {
-    return { time: i.time, bar: i.bar, event, sceneId: this.current!, seed: this.seed, level: i.character, crossfadeBeats: 0, crossfadeS: 0, colour: 'near', transition: { kind: 'morph', style: 0 } };
+    return { time: i.time, bar: i.bar, event, sceneId: this.current!, seed: this.seed, level: i.character, crossfadeBeats: 0, crossfadeS: 0, colour: 'near', transition: { kind: 'morph', style: 0 }, echo: this.echo };
   }
 
   // A rotation or character change between two swarms draws from the whole menu (CONFIG.director.transition); the
@@ -200,6 +208,8 @@ export class Director {
       beats = transition.kind === 'nothing' ? CONFIG.director.transition.nothingBeats : transition.kind === 'cut' ? 0 : Math.max(beats, CONFIG.director.morphBeats);
     }
     if (f === 'breakdown' && this.active !== 'breakdown' && this.current !== null) this.beforeBreakdown = { id: this.current, seed: this.seed, bar: this.sceneBar };
+    // A full-screen shader scene would only lift its whole picture under an echo: swarms only.
+    this.echo = this.echoOn && isSwarm(pick.id) ? pickExcept(CONFIG.echo.weights, null, this.echoRand()) : 'off';
     this.current = pick.id;
     this.active = f;
     this.seed = seed;
@@ -207,6 +217,6 @@ export class Director {
     this.sceneTime = i.time;
     this.lastShown.set(pick.id, ++this.shown);
     const crossfadeS = beats === 0 ? 0 : beats !== null && i.bpm ? (beats * 60) / i.bpm : CONFIG.director.immediateCrossfadeS;
-    return { time: i.time, bar: i.bar, event, sceneId: pick.id, seed, level: i.character, crossfadeBeats: beats !== null && i.bpm ? beats : null, crossfadeS, colour: event === 'character' ? 'own' : 'near', transition };
+    return { time: i.time, bar: i.bar, event, sceneId: pick.id, seed, level: i.character, crossfadeBeats: beats !== null && i.bpm ? beats : null, crossfadeS, colour: event === 'character' ? 'own' : 'near', transition, echo: this.echo };
   }
 }

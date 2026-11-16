@@ -10,6 +10,7 @@ import { POOLS, poolsOf } from './scenes/pools';
 import { loadShaderScenes } from './scenes/registry';
 import { SILENT, type Features, type Scene } from './scenes/types';
 import { loadCarry, saveCarry } from './session/carry';
+import { Ears, type EarsReading } from './audio/ears';
 import { LogSink } from './session/logSink';
 import { sessionId } from './session/session';
 
@@ -18,8 +19,13 @@ const $ = (id: string) => document.getElementById(id)!;
 const session = sessionId();
 const sceneLog = new LogSink(session, 'scene-log');
 const frameLog = new LogSink(session, 'frames');
-const featureLog = params.get('features') === '1' ? new LogSink(session, 'features') : null;
-setInterval(() => [sceneLog, frameLog, featureLog].forEach((s) => void s?.flush()), 5000);
+// What the engine heard, every frame, every session (2026-11-16) — six band levels and loudness, not audio. Replayed
+// through the analysis (analysis/replay.test.ts) it shows what any rule did on the night, or would do changed. It was
+// opt-in until the 2026-11-15 set, whose black build-ups could not be measured afterwards.
+const featureLog = new LogSink(session, 'features');
+// The second hearing's hops, a row a second (audio/ears.ts): what replays the beat tracker on a set afterwards.
+const hopLog = new LogSink(session, 'hops');
+setInterval(() => [sceneLog, frameLog, featureLog, hopLog].forEach((s) => void s.flush()), 5000);
 
 const t0 = performance.now();
 const nowS = () => (performance.now() - t0) / 1000;
@@ -52,6 +58,7 @@ async function start() {
 
   function apply(dec: Decision) {
     sceneLog.push(dec);
+    compositor.setEcho(dec.echo);
     compositor.show(scenes.get(dec.sceneId)!, dec.seed, dec.crossfadeS, nowS(), dec.colour, dec.transition);
   }
 
@@ -69,18 +76,23 @@ async function start() {
   });
 
   let capture: Capture | null = null;
+  let ears: Ears | null = null;
   const analysis = new Analysis();
   let features: Features = SILENT;
+  let heard: EarsReading | null = null;
   let freq = new Float32Array(CONFIG.fftSize / 2);
   let wave = new Float32Array(CONFIG.fftSize);
 
   async function tryAudio() {
     try {
       capture = await openBlackHole();
+      // Listens only; the wall goes on without it if the worklet will not load.
+      const second = new Ears(capture.ctx, (row) => hopLog.push(row));
+      second.listen(capture.source).then(() => (ears = second), (e) => sceneLog.push({ time: nowS(), event: 'ears-unavailable', error: String(e) }));
       navigator.mediaDevices.addEventListener('devicechange', () => {
         guard.lastAudioS = Math.min(guard.lastAudioS ?? 0, nowS() - CONFIG.stream.silentS); // recheck now
       });
-      director = new Director([...scenes.values()].map((s) => ({ id: s.id, pools: poolsOf(s.id), swarm: s.morphFrom !== undefined })), Number(session.replace(/\D/g, '').slice(-9)));
+      director = new Director([...scenes.values()].map((s) => ({ id: s.id, pools: poolsOf(s.id), swarm: s.morphFrom !== undefined })), Number(session.replace(/\D/g, '').slice(-9)), CONFIG.echo.live);
       for (const id of carry.disabled) director.disable(id, input);
     } catch (e) {
       sceneLog.push({ time: nowS(), event: 'audio-unavailable', error: String(e) });
@@ -92,7 +104,7 @@ async function start() {
   let overlayOn = false;
   window.addEventListener('keydown', (e) => {
     if (e.key === 'q') {
-      void Promise.all([sceneLog, frameLog, featureLog].map((s) => s?.flush())).then(() => fetch('/quit', { method: 'POST' }));
+      void Promise.all([sceneLog, frameLog, featureLog, hopLog].map((s) => s.flush())).then(() => fetch('/quit', { method: 'POST' }));
       gl.clearColor(0, 0, 0, 1);
       gl.clear(gl.COLOR_BUFFER_BIT);
       running = false;
@@ -115,7 +127,10 @@ async function start() {
       capture.analyser.getFloatTimeDomainData(wave);
       features = analysis.frame(t, freq, wave, capture.ctx.sampleRate);
       if (features.rmsDb > CONFIG.idle.db) guard.lastAudioS = t;
-      featureLog?.push({ t: +t.toFixed(4), rms: +features.rmsDb.toFixed(1), bands: analysis.bands.map((b) => Number(b.toPrecision(4))) });
+      heard = ears?.read() ?? null;
+      // e: the second hearing at this frame — tempo, beat, confidence, share of beats with a kick, kicks since the last frame.
+      featureLog.push({ t: +t.toFixed(4), rms: +features.rmsDb.toFixed(1), bands: analysis.bands.map((b) => Number(b.toPrecision(4))),
+        ...(heard && { e: [heard.bpm === null ? null : +heard.bpm.toFixed(1), +heard.beat.toFixed(2), +heard.confidence.toFixed(2), +heard.kickPresence.toFixed(2), heard.kicks] }) });
     }
     if (streamAction(t, guard) === 'reopen' && capture) {
       guard.lastReopenS = t;
@@ -144,7 +159,7 @@ async function start() {
       dampedFrames = 0;
     }
     if (compositor.damped) dampedFrames++; // this frame opens the new second, so count it after the reset
-    if (overlayOn) $('overlay').textContent = overlayText(features, compositor.currentId, watch.scale, compositor.damped);
+    if (overlayOn) $('overlay').textContent = overlayText(features, compositor.currentId, watch.scale, compositor.damped, heard);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);

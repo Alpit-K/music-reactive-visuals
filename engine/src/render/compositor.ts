@@ -1,5 +1,5 @@
 import { CONFIG } from '../config';
-import { SILENT, type Features, type Scene, type Transition } from '../scenes/types';
+import { SILENT, type Echo, type Features, type Scene, type Transition } from '../scenes/types';
 import { FlashLimiter } from './flashLimiter';
 import { FULLSCREEN_VERT, createTarget, deleteTarget, program, type Target } from './gl';
 
@@ -38,6 +38,32 @@ void main() {
   outColor = vec4(sum / 192.0, 1.0);
 }`;
 
+// The echo (CONFIG.echo): the brighter of the new picture and the last echo — zoomed about the centre, dimmed in linear
+// light, less the floor. Inward, what the zoom pulls in from past the edges is black, not the edge pixels smeared.
+const ECHO_FRAG = `#version 300 es
+precision highp float;
+uniform sampler2D u_new, u_old;
+uniform float u_zoom, u_keep, u_floor;
+uniform vec2 u_res;
+out vec4 outColor;
+${DECODE}
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_res;
+  vec2 from = (uv - 0.5) / u_zoom + 0.5;
+  vec3 old = vec3(0.0);
+  if (all(greaterThanEqual(from, vec2(0.0))) && all(lessThanEqual(from, vec2(1.0)))) {
+    old = max(toSrgb(toLinear(texture(u_old, from).rgb) * u_keep) - u_floor, 0.0);
+  }
+  outColor = vec4(max(texture(u_new, uv).rgb, old), 1.0);
+}`;
+
+/** One frame of an echo style `dt` seconds long: how much the echo grows, and the share of its light it keeps. `length`
+ *  scales the half-life — and with it how far the wake reaches — 1 in full, falling to 0 as the echo is let go. */
+export function echoStep(echo: Exclude<Echo, 'off'>, dt: number, length = 1): { zoom: number; keep: number } {
+  const s = CONFIG.echo.styles[echo];
+  return { zoom: Math.exp(s.zoomPerS * dt), keep: length > 0 ? 0.5 ** (dt / (s.halfLifeS * length)) : 0 };
+}
+
 const BLIT_FRAG = `#version 300 es
 precision highp float;
 uniform sampler2D u_src;
@@ -63,12 +89,18 @@ export class Compositor {
   private cand!: Target;
   private out!: [Target, Target];
   private outIdx = 0;
+  private echo: Echo = 'off'; // the echo drawn, which stays on while it is let go
+  private release: number | null = null; // 0..1 through letting the echo go, or null when it is not going
+  private echoes!: [Target, Target];
+  private echoIdx = 0;
+  private lastTime: number | null = null;
   private tiles: Target;
   private tileBuf = new Uint8Array(CONFIG.flash.tilesX * CONFIG.flash.tilesY * 4);
   private tileLin = new Float32Array(CONFIG.flash.tilesX * CONFIG.flash.tilesY * 3);
   private mixProg: WebGLProgram;
   private tilesProg: WebGLProgram;
   private blitProg: WebGLProgram;
+  private echoProg: WebGLProgram;
   private vao: WebGLVertexArrayObject;
   private black: Target;
 
@@ -76,6 +108,7 @@ export class Compositor {
     this.mixProg = program(gl, FULLSCREEN_VERT, MIX_FRAG);
     this.tilesProg = program(gl, FULLSCREEN_VERT, TILES_FRAG);
     this.blitProg = program(gl, FULLSCREEN_VERT, BLIT_FRAG);
+    this.echoProg = program(gl, FULLSCREEN_VERT, ECHO_FRAG);
     this.vao = gl.createVertexArray()!;
     this.tiles = createTarget(gl, CONFIG.flash.tilesX, CONFIG.flash.tilesY);
     this.black = createTarget(gl, 1, 1);
@@ -90,18 +123,42 @@ export class Compositor {
     const { width, height } = this.size;
     this.cand = createTarget(this.gl, width, height);
     this.out = [createTarget(this.gl, width, height), createTarget(this.gl, width, height)];
+    this.echoes = [createTarget(this.gl, width, height), createTarget(this.gl, width, height)];
   }
 
   setScale(scale: number): void {
     const gl = this.gl;
     this.scale = scale;
-    [this.cand, ...this.out].forEach((t) => deleteTarget(gl, t));
+    [this.cand, ...this.out, ...this.echoes].forEach((t) => deleteTarget(gl, t));
     this.allocate();
     for (const slot of [this.a, this.b]) {
       if (!slot) continue;
       deleteTarget(gl, slot.target);
       slot.target = createTarget(gl, this.size.width, this.size.height);
     }
+  }
+
+  /** The echo from now on. Turned on, it starts from black, not from whatever it last held. Turned off, its wake shrinks
+   *  away over CONFIG.echo.releaseBeats rather than in one frame — an out halo can cover most of the screen. */
+  get drawnEcho(): Echo {
+    return this.echo;
+  }
+
+  setEcho(echo: Echo): void {
+    const gl = this.gl;
+    if (echo === 'off') {
+      if (this.echo !== 'off') this.release ??= 0;
+      return;
+    }
+    this.release = null;
+    if (this.echo === 'off') {
+      for (const t of this.echoes) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, t.fb);
+        gl.clearColor(0, 0, 0, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+      }
+    }
+    this.echo = echo;
   }
 
   show(scene: Scene, seed: number, crossfadeS: number, time: number, colour: 'near' | 'own' = 'near', transition: Transition = { kind: 'morph', style: 0 }): void {
@@ -172,13 +229,23 @@ export class Compositor {
 
     const progress = this.b ? Math.min(1, (time - this.fadeStart) / this.fadeS) : 0;
     this.mix(this.a?.target ?? this.black, this.b?.target ?? this.black, progress, this.cand);
+    const dt = this.lastTime === null ? 0 : Math.min(0.1, Math.max(0, time - this.lastTime)); // a stalled page is no reason to jump
+    this.lastTime = time;
+    if (this.release !== null) {
+      this.release += dt / ((CONFIG.echo.releaseBeats * 60) / (f.bpm ?? CONFIG.motion.fallbackBpm));
+      if (this.release >= 1) {
+        this.echo = 'off';
+        this.release = null;
+      }
+    }
+    const picture = this.echo === 'off' ? this.cand : this.echoPass(this.echo, dt, 1 - (this.release ?? 0));
 
     // Tile stats → limiter → damped output.
     gl.useProgram(this.tilesProg);
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.tiles.fb);
     gl.viewport(0, 0, CONFIG.flash.tilesX, CONFIG.flash.tilesY);
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.cand.tex);
+    gl.bindTexture(gl.TEXTURE_2D, picture.tex);
     gl.uniform1i(gl.getUniformLocation(this.tilesProg, 'u_src'), 0);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.readPixels(0, 0, CONFIG.flash.tilesX, CONFIG.flash.tilesY, gl.RGBA, gl.UNSIGNED_BYTE, this.tileBuf);
@@ -191,7 +258,7 @@ export class Compositor {
     const prev = this.out[this.outIdx];
     this.outIdx = 1 - this.outIdx;
     const next = this.out[this.outIdx];
-    this.mix(prev, this.cand, alpha, next);
+    this.mix(prev, picture, alpha, next);
 
     gl.useProgram(this.blitProg);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -203,6 +270,30 @@ export class Compositor {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     if (this.b && progress >= 1) this.finishFade();
+  }
+
+  // Before the limiter, so it judges the picture with its echo: an echo only ever adds light that was on screen a moment ago.
+  private echoPass(echo: Exclude<Echo, 'off'>, dt: number, length: number): Target {
+    const gl = this.gl;
+    const { zoom, keep } = echoStep(echo, dt, length);
+    const old = this.echoes[this.echoIdx];
+    this.echoIdx = 1 - this.echoIdx;
+    const into = this.echoes[this.echoIdx];
+    gl.useProgram(this.echoProg);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, into.fb);
+    gl.viewport(0, 0, into.width, into.height);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.cand.tex);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, old.tex);
+    gl.uniform1i(gl.getUniformLocation(this.echoProg, 'u_new'), 0);
+    gl.uniform1i(gl.getUniformLocation(this.echoProg, 'u_old'), 1);
+    gl.uniform1f(gl.getUniformLocation(this.echoProg, 'u_zoom'), zoom);
+    gl.uniform1f(gl.getUniformLocation(this.echoProg, 'u_keep'), keep);
+    gl.uniform1f(gl.getUniformLocation(this.echoProg, 'u_floor'), CONFIG.echo.floor);
+    gl.uniform2f(gl.getUniformLocation(this.echoProg, 'u_res'), into.width, into.height);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    return into;
   }
 
   private mix(a: Target, b: Target, t: number, into: Target): void {

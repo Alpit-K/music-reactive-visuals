@@ -59,7 +59,7 @@ describe('LifeCycle', () => {
     expect(play(lc, 100, 100, 60).every((x) => x.life === 1)).toBe(true);
   });
 
-  it('comes apart once the kick has been out 4 bars, gone by 8, and builds back within a bar of the drop', () => {
+  it('comes apart once the kick has been out 4 bars, gone by 8, and is whole 0.1 s after the drop', () => {
     let seed = 1;
     while (firstBreakdown(seed).breakdown === 'hold') seed++;
     lastPick.breakdown = null;
@@ -71,7 +71,23 @@ describe('LifeCycle', () => {
     expect(at(lives, 10 + 6 * BAR)).toBeLessThan(0.7);
     expect(at(lives, 10 + 8.1 * BAR)).toBe(0);
     expect(at(lives, back - 0.1)).toBe(0);
-    expect(at(lives, back + 1.05 * BAR)).toBe(1);
+    expect(at(lives, back + L.dropBackS + 0.05)).toBe(1);
+  });
+
+  it('what is left gathers through a build: nothing at 4 bars out, all of it by 12', () => {
+    let seed = 1;
+    while (firstBreakdown(seed).breakdown === 'hold') seed++;
+    lastPick.breakdown = null;
+    const gatherAt = (bars: number) => {
+      lastPick.breakdown = null;
+      const lc = new LifeCycle(seed, 0, true, true);
+      play(lc, 10, 100, 10 + bars * BAR);
+      return lc.gather;
+    };
+    expect(gatherAt(4)).toBeLessThan(0.05);
+    expect(gatherAt(8)).toBeGreaterThan(0.3);
+    expect(gatherAt(8)).toBeLessThan(0.7);
+    expect(gatherAt(12.5)).toBe(1);
   });
 
   it('a hold breakdown keeps the form whole', () => {
@@ -93,14 +109,15 @@ describe('LifeCycle', () => {
     expect(lc.copies).toBe(0);
   });
 
-  it('leaves dust or a point only for those breakdowns, and builds them back from it', () => {
+  it('always leaves dust or a point when a form comes apart', () => {
     const rests = new Set<number>();
     for (let s = 1; s < 40; s++) {
       const lc = firstBreakdown(s);
       rests.add(lc.rest);
-      expect(lc.rest).toBe(lc.breakdown === 'dust' ? REST.dust : lc.breakdown === 'point' ? REST.point : REST.none);
+      if (lc.breakdown !== 'hold') expect(lc.rest).toBe(lc.breakdown === 'dust' ? REST.dust : REST.point);
+      rests.add(lc.rest);
     }
-    expect([...rests].sort()).toEqual([REST.none, REST.dust, REST.point]);
+    expect(rests.has(REST.dust) && rests.has(REST.point)).toBe(true);
   });
 
   it('never takes a set apart the same way twice running, across showings', () => {

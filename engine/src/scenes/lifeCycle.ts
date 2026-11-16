@@ -9,11 +9,11 @@ import type { Features } from './types';
 
 /** How a form builds itself, and comes apart: the same, reversed. Picked per showing (choices()). */
 export const BUILD_STYLES = ['draw along its line', 'grow from the centre', 'gather from dust', 'fall into place'] as const;
-export const BREAKDOWNS = ['vanish', 'dust', 'point', 'hold'] as const;
+export const BREAKDOWNS = ['dust', 'point', 'hold'] as const;
 export const DROPS = ['copies', 'larger', 'same'] as const;
 export type Breakdown = (typeof BREAKDOWNS)[number];
 export type Drop = (typeof DROPS)[number];
-/** What is left once a form has come apart: nothing, drifting dust, or one glowing point. */
+/** What is left once a form has come apart: drifting dust or one glowing point (nothing: through-nothing changes only). */
 export const REST = { none: 0, dust: 1, point: 2 } as const;
 
 /** A weighted pick that is never `last`, unless nothing else is allowed. */
@@ -36,11 +36,13 @@ export class LifeCycle {
   life = 1;          // 0 nothing .. 1 the whole form
   style: number;     // index into BUILD_STYLES for the coming apart or building now under way
   rest: number = REST.none;
+  gather = 0;        // 0..1: how far what is left has gathered through a build — more dust, a larger point (2026-11-16)
   copies = 0;        // 0: the showing's own arrangement; n: the dots shared among n forms over the screen (1: one, larger)
   breakdown: Breakdown | null = null;
   private breaking = false;
   private from = 1;  // life when the current change began
   private t0 = -Infinity;
+  private backS = 0; // how long the build back under way takes
   private brokeAt = -Infinity;
   private rand: () => number;
 
@@ -64,6 +66,7 @@ export class LifeCycle {
         lastPick.breakdown = this.breakdown;
         this.style = this.breakdown === 'dust' ? 2 : this.breakdown === 'point' ? 1 : this.ownStyle;
         this.rest = this.breakdown === 'dust' ? REST.dust : this.breakdown === 'point' ? REST.point : REST.none;
+        this.gather = 0;
       }
       this.brokeAt = t;
       this.from = this.life;
@@ -72,12 +75,20 @@ export class LifeCycle {
       this.breaking = false;
       // The drop, onto a form fully come apart: it may come back changed. Only then — a change while any of it
       // shows would make dots jump.
-      if (this.life < 0.02 && f.sinceDrop < 0.5) this.dropped();
+      const drop = f.sinceDrop < 0.5;
+      if (this.life < 0.02 && drop) this.dropped();
+      // On the drop the form is whole within the burst's own rise, so the burst has a form to throw (2026-11-16: over a
+      // bar, the burst was spent on a near-empty screen and the drop read as late).
+      this.backS = drop ? L.dropBackS : L.backBars * bar;
       this.from = this.life;
       this.t0 = t;
     }
+    // As the form comes apart, what is left gathers through the build, so a long build-up is never a bare screen.
+    const gone = L.outStartBars * bar;
+    const g = this.breaking ? Math.min(1, Math.max(0, (f.sinceKick - gone) / (L.gatherBars * bar))) : 0;
+    this.gather = this.breaking ? g * g * (3 - 2 * g) : this.gather;
 
-    const k = Math.min(1, Math.max(0, (t - this.t0) / ((this.breaking ? L.outBars : L.backBars) * bar)));
+    const k = Math.min(1, Math.max(0, (t - this.t0) / (this.breaking ? L.outBars * bar : this.backS)));
     if (this.breaking) this.life = this.breakdown === 'hold' ? this.from + (1 - this.from) * k : this.from * (1 - k);
     else this.life = this.from + (1 - this.from) * k;
   }

@@ -381,6 +381,41 @@ The 60 s window let one 30 s misread drop dark for 45 s. The engine's own replay
 
 **Headless checks of the new swarms** (`engine/scripts/swarm-check.mjs`, the curation page in headless Chrome on the real GPU, a synthetic kick track): all 79 scenes and swarm forms compile and hold 60 fps — frame p95 ≤ 16.8 ms — with the backdrop and copies, including mirror (every lead dot drawn twice) on the 120 000-dot swarms. rAF caps at 60, so this is 60 fps held, not headroom. Screen tiles lit (of 8 × 6) rose from 29 to 43 on average with orbit; forms sway 12–20% of the screen's width over 8 s at main's groove. **Uncapped** (`--uncapped`: no vsync, no frame cap), the heaviest case — romanesco ↔ fern, mirror into mirror, ~245 000 dots morphing — ran frame p95 10.1 ms, p99 12.2 ms, one 28 ms frame as a scene set up; a plain sphere 5.3 ms. Headroom headless ~30–40% of the 16.7 ms budget; live, rekordbox and the fanless Air's throttling take their share, and FrameWatch's scale-down lowers resolution, not dot count. The shader check caught two compile errors before they shipped (a name used twice, and `half`, a reserved word in GLSL).
 
+## 12. Second hearing against the kick detector (2026-11-16)
+
+**Recording:** Max Cooper, RA Live Waterworks 2025 (89 min, a download the user supplied, `refs/music/`, gitignored), through both analyses offline. No labelled beats exist for it; librosa's offline tracker (PyPI, 8 s tempo window) served as a second opinion, not as truth — its own tempo jumps between coarse steps.
+
+| Measure | Kick detector and clock | Second hearing |
+|---|---|---|
+| Seconds with a tempo within 2% of its ±30 s median | 83.1% | 90.0% |
+| Minutes 3–15 (librosa: 103.4 BPM) | 121–138 — 4/3 of the tempo, the off-beat misread of §7, forced by the 115–150 fold | 103.5–104.5 |
+| Three-minute slots from minute 21 to 36: range of tempo read | dips to 118 in three of five slots | within 3 BPM in all five |
+| Minutes 54–57 (a plain four-on-the-floor kick): kicks on the beat | 88% | 95% |
+| Minute 55: beat gaps, p5–p95 | — | 449.7–451.0 ms |
+
+**Synthetic loops** (`analysis/tempo.test.ts`): four-on-the-floor at 100–150 BPM within 1 BPM; 75, 90, 165 and 174 as themselves or an octave away; a two-step break at 172 as 172 or 86; an off-beat bass note 3/4 of a beat after each kick does not pull it off 128; a tempo change followed within 15 s; beats within 25 ms of the true beat; every kick heard within 20 ms and none in a 30 s breakdown that keeps its snare and hats.
+
+**What went wrong on the way** — each is a rule in `CONFIG.ears` now:
+- Repeats weighted toward the first beat read a two-step break at 172 as 114.7, its 6/16 kick gap. Counted equally, the bar-long repeats win.
+- Rises are measured in dB, so over an empty low band a snare's faint low end rose as far as a kick. A kick must also reach within 12 dB of the band's recent peak.
+- In a 30–150 Hz band a rolling bassline's notes passed as kicks: 2,476 "kicks" in 12 minutes of 1,548 beats. The kick is heard in 25–65 Hz from a longer window.
+- With the bassline in it, the beat's position wandered ±35 ms. It is read from the sub-bass alone.
+
+**Not shown:** that it is better on the user's own techno. Most of this recording's kicks are syncopated — in minutes 24, 27 and 75 neither analysis puts more than half its kicks on the beat — so "kicks on the beat" is a fair score only for 54–57. The beat-free and broken stretches (minutes 0–3, 42–45, 84–89) still read unsteady tempos (ranges of 40–60 BPM within a three-minute slot).
+
+**A set in the user's own style, the same day:** Amotik, Boiler Room x Hardline Pune (53 min, hard techno at 138, a download the user supplied), through both analyses offline.
+
+| Measure | Kick detector and clock | Second hearing |
+|---|---|---|
+| Seconds with a tempo within 2% of its ±30 s median | 85.8% | 96.5% |
+| Tempo read, three-minute slots from minute 21 on | medians 135.1–138.5, dipping to 118–122 in nine of eleven slots | 138.0, range 138–138, in all eleven |
+| Kicks within 12% of a beat of the second hearing's beat | 59% of 6,644 | 52% of 7,049 |
+
+- **Tempo is the gain**: once locked it holds 138.0 for 44 minutes, where the clock wanders 118–146.
+- **The kick is no better than the old detector's**, by this score slightly worse. Folded on the beat, both put most kicks on it, and both count real off-beat sub hits (a 16th before the beat in minute 1; mid-beat in minutes 36 and 45). In minute 45 the second hearing counts 199 a minute at 138 BPM.
+- **Fault: reads 92 (2/3 of 138) and once 69 (half) for spells in the first 8 minutes and at minutes 15 and 18**, where the beat is weak — and the 2 s rule for leaving a tempo then holds the wrong one.
+- **Fault: the beat sits ~70 ms early in minutes 48–53.** There the sub-bass swells for half a beat before each kick (a rumble), and the beat's position locks to the swell; kicks land 2–3 sixteenths after it.
+
 ## Starting configuration for V1
 
 From `spike/logs/capture-20261001074825.config.json` and the `analyse.py` defaults (design §5):

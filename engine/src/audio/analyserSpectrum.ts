@@ -2,7 +2,7 @@
 // "FFT windowing and smoothing over time"): Blackman window, FFT scaled by 1/N, magnitude in dB.
 // Lets a recording be analysed without a browser. No imports, so plain Node can load it too.
 
-const cache = new Map<number, { win: Float64Array; cos: Float64Array; sin: Float64Array; rev: Uint32Array }>();
+const cache = new Map<number, { win: Float64Array; cos: Float64Array; sin: Float64Array; rev: Uint32Array; re: Float64Array; im: Float64Array }>();
 
 function tables(n: number) {
   let t = cache.get(n);
@@ -22,7 +22,8 @@ function tables(n: number) {
       for (let b = 0; b < bits; b++) r |= ((i >> b) & 1) << (bits - 1 - b);
       rev[i] = r;
     }
-    t = { win, cos, sin, rev };
+    // Working arrays kept per size: the onset front end calls this 172 times a second on the audio thread.
+    t = { win, cos, sin, rev, re: new Float64Array(n), im: new Float64Array(n) };
     cache.set(n, t);
   }
   return t;
@@ -31,9 +32,8 @@ function tables(n: number) {
 /** `wave` is the last fftSize mono samples; `out` gets fftSize / 2 bins in dB. */
 export function analyserSpectrum(wave: Float32Array, out: Float32Array): void {
   const n = wave.length;
-  const { win, cos, sin, rev } = tables(n);
-  const re = new Float64Array(n);
-  const im = new Float64Array(n);
+  const { win, cos, sin, rev, re, im } = tables(n);
+  im.fill(0);
   for (let i = 0; i < n; i++) re[rev[i]] = wave[i] * win[i];
   for (let size = 2; size <= n; size *= 2) {
     const half = size / 2;

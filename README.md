@@ -57,9 +57,9 @@ Logs go to `logs/` (gitignored). Each session gets its own folder, `logs/<sessio
 |---|---|---|
 | `<session>/frames.jsonl` | Frame times, render scale and the current scene, once a second | The watchdog relaunches Chrome when these stop arriving, so this log cannot be switched off |
 | `<session>/scene-log.jsonl` | Every director decision and audio event | Diagnosing a set afterwards; V1.1 replays it to render video |
+| `<session>/features.jsonl` | What the engine heard, every frame: six band levels and loudness (about 20 MB an hour; numbers, not audio) | Replaying a set through the analysis afterwards, to see what any rule did or would do changed |
+| `<session>/hops.jsonl` | The second hearing's raw onsets, a row a second (about 20 MB an hour; numbers, not audio) | Replaying the new beat tracker on a set, while it only listens |
 | `launcher.log` | Launches, relaunches, quits, the restored output | Diagnosing the launcher |
-
-The per-frame audio-feature log (`features.jsonl`, about 20 MB an hour) is off for normal sessions. Use it only for a tuning set: run the dev servers below and open the page with `?features=1`.
 
 ## Development
 
